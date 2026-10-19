@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">How REA Safe Agent works</title>
+  <desc id="desc">Your files enter the REA container only as frozen, hash-approved copies. REA with Ghidra runs in one container and Codex or Claude Code in a second one; both have no network. A trusted controller on your computer relays only 22 approved tools between them, bounds every result, and sends model requests over one fixed HTTPS route using your own Claude or ChatGPT subscription. The report is saved privately. Analysis is static; the file never runs.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#93A1B3"/>
+    </marker>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#38C0F8"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101826"/>
+      <stop offset="1" stop-color="#070B12"/>
+    </linearGradient>
+  </defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #F2F5F8; }
+    .title { font-size: 30px; font-weight: 800; }
+    .sub { font-size: 16px; fill: #93A1B3; }
+    .head { font-size: 19px; font-weight: 800; }
+    .item { font-size: 15px; }
+    .muted { font-size: 13px; fill: #93A1B3; font-weight: 600; letter-spacing: .08em; }
+    .label { font-size: 13px; font-weight: 700; fill: #C9D3DF; }
+    .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  </style>
+
+  <rect width="1200" height="640" rx="24" fill="url(#bg)"/>
+  <text x="40" y="54" class="title">How REA Safe Agent works</text>
+  <text x="40" y="82" class="sub">Two isolated containers with a trusted gateway in between. Static analysis: the file never runs.</text>
+
+  <!-- your computer -->
+  <rect x="24" y="104" width="916" height="452" rx="18" fill="none" stroke="#22324A" stroke-width="2" stroke-dasharray="8 7"/>
+  <text x="44" y="130" class="muted">YOUR COMPUTER</text>
+
+  <!-- files and report -->
+  <rect x="44" y="150" width="160" height="104" rx="14" fill="#0E1622" stroke="#22324A" stroke-width="2"/>
+  <path d="M62 168 h15 l7 7 v20 h-22 z" fill="none" stroke="#93A1B3" stroke-width="2"/>
+  <text x="96" y="190" class="head">Files</text>
+  <text x="62" y="222" class="item">you don't trust</text>
+  <text x="62" y="242" class="mono" style="fill:#93A1B3">copy + SHA-256 →</text>
+
+  <rect x="44" y="420" width="160" height="104" rx="14" fill="#0E1622" stroke="#3DDC97" stroke-width="2"/>
+  <text x="62" y="452" class="head">Report</text>
+  <text x="62" y="478" class="item">saved privately</text>
+  <text x="62" y="500" class="item">for you to read</text>
+
+  <!-- REA container -->
+  <rect x="246" y="150" width="216" height="374" rx="18" fill="#0E1622" stroke="#0A8CFA" stroke-width="3"/>
+  <rect x="246" y="150" width="216" height="46" rx="18" fill="#0A8CFA"/>
+  <rect x="246" y="176" width="216" height="20" fill="#0A8CFA"/>
+  <text x="264" y="180" class="head">① REA container</text>
+  <text x="264" y="232" class="item">REA 6.7.0 + Ghidra 12.1.4</text>
+  <text x="264" y="262" class="item">reads only frozen</text>
+  <text x="264" y="282" class="item">copies at /input</text>
+  <text x="264" y="318" class="item">✓ network: none</text>
+  <text x="264" y="344" class="item">✓ read-only root</text>
+  <text x="264" y="370" class="item">✓ no capabilities</text>
+  <text x="264" y="396" class="item">✓ bounded memory/CPU</text>
+  <text x="264" y="436" class="label">strings · functions ·</text>
+  <text x="264" y="456" class="label">decompiled code · bytes</text>
+
+  <!-- controller -->
+  <rect x="496" y="190" width="176" height="294" rx="18" fill="#0E1622" stroke="#38C0F8" stroke-width="3"/>
+  <text x="584" y="226" class="head" text-anchor="middle">Gateway</text>
+  <text x="584" y="248" class="sub" text-anchor="middle" style="font-size:13px">trusted controller</text>
+  <text x="514" y="290" class="item">22 approved tools</text>
+  <text x="514" y="314" class="item">everything else</text>
+  <text x="514" y="334" class="item">is refused</text>
+  <text x="514" y="370" class="item">results ≤ 200 KB</text>
+  <text x="514" y="406" class="item">no callbacks</text>
+  <text x="514" y="430" class="item">to your system</text>
+  <text x="514" y="466" class="item">one fixed route</text>
+
+  <!-- agent container -->
+  <rect x="706" y="150" width="216" height="374" rx="18" fill="#0E1622" stroke="#FA7C00" stroke-width="3"/>
+  <rect x="706" y="150" width="216" height="46" rx="18" fill="#FA7C00"/>
+  <rect x="706" y="176" width="216" height="20" fill="#FA7C00"/>
+  <text x="724" y="180" class="head" style="fill:#0B0F14">② Agent container</text>
+  <text x="724" y="232" class="item">Claude Code or Codex</text>
+  <text x="724" y="262" class="item">reads REA's results,</text>
+  <text x="724" y="282" class="item">writes the report</text>
+  <text x="724" y="318" class="item">✓ network: none</text>
+  <text x="724" y="344" class="item">✓ zero host mounts</text>
+  <text x="724" y="370" class="item">✓ no shell, no file writes</text>
+  <text x="724" y="396" class="item">✓ only REA tools</text>
+  <text x="724" y="436" class="label">instructions hidden in the</text>
+  <text x="724" y="456" class="label">file get no shell or host access</text>
+
+  <!-- model service -->
+  <rect x="972" y="236" width="204" height="150" rx="18" fill="#0E1622" stroke="#93A1B3" stroke-width="2"/>
+  <path d="M1040 286 h40 a14 14 0 0 0 -4 -27.5 a20 20 0 0 0 -37 6 a11 11 0 0 0 1 21.5 z" fill="none" stroke="#38C0F8" stroke-width="2.4" stroke-linejoin="round"/>
+  <text x="1074" y="320" class="head" text-anchor="middle">Model service</text>
+  <text x="1074" y="346" class="item" text-anchor="middle">your Claude or</text>
+  <text x="1074" y="366" class="item" text-anchor="middle">ChatGPT subscription</text>
+
+  <!-- flows -->
+  <path d="M204 202 H240" stroke="#93A1B3" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M466 300 H490" stroke="#38C0F8" stroke-width="2.5" fill="none" marker-start="url(#arrowCyan)" marker-end="url(#arrowCyan)"/>
+  <path d="M676 300 H700" stroke="#38C0F8" stroke-width="2.5" fill="none" marker-start="url(#arrowCyan)" marker-end="url(#arrowCyan)"/>
+  <text x="584" y="182" class="mono" text-anchor="middle" style="fill:#38C0F8">MCP only</text>
+  <path d="M584 484 V586 H1074 V392" stroke="#38C0F8" stroke-width="2.5" fill="none" stroke-dasharray="2 0" marker-end="url(#arrowCyan)"/>
+  <text x="836" y="606" class="mono" text-anchor="middle" style="fill:#38C0F8">fixed HTTPS · your subscription · no API key · analyzed content can reach the service</text>
+  <path d="M520 484 V540 C520 552 512 556 500 556 H212" stroke="#3DDC97" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="356" y="548" class="mono" text-anchor="middle" style="fill:#3DDC97">transcript</text>
+</svg>

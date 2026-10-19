@@ -6,8 +6,9 @@ Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT 
 
 This increment adds Ghidra 12.1.4 to the REA image, exposes 16 read-only native
 queries, bounds every relayed result at 200,000 bytes and replaces API keys with
-subscription logins. Its evidence so far is **macOS ARM64 only**; the matrix in
-the next section describes the previous release and must be re-run for this change.
+subscription logins. Native macOS ARM64 was verified locally and native Linux
+AMD64 in [public CI run 39233416497](https://github.com/dagoSte/rea-safe-agents/actions/runs/39233416497),
+which passed all four jobs. The matrix in the last section describes the previous release.
 
 | Check | Result |
 | --- | --- |
@@ -16,7 +17,7 @@ the next section describes the previous release and must be re-run for this chan
 | `verify_runtime.py`, both clients, native macOS ARM64 | Passed: ZIP inventory with known child SHA-256, then Ghidra recovered the known string from a generated ELF; eleven probes and cleanup passed |
 | Claude subscription profile offline | Passed: non-bare Claude Code sent `Authorization: Bearer` with `oauth-2025-04-20`; the gateway checked it against the inert login. The fixture receives no credential, so the live header-building branch is covered by unit tests only |
 | Real analysis with an outside agent as the model | Passed for Claude Code: decompiled `main` and `fnv1a32` of a compiled x86-64 ELF and decoded its XOR-0x5a string from REA output alone |
-| Linux AMD64 runtime, Windows policy CI | Not yet run for this increment |
+| Public CI, this release | All four jobs passed: Linux, macOS and Windows policy suites, and Linux AMD64 runtime with both real clients; Ghidra recovered the known ELF string |
 | Live Claude subscription analysis, native macOS ARM64 | Passed: `claude-opus-5-5` through the owner's `claude setup-token` login, 7 model requests and 11 successful REA calls; the report matched the known source (see below) |
 | Live Codex analysis with a ChatGPT login, native macOS ARM64 | Passed: `gpt-6.1-sol` through a dedicated `codex-login` device login, 5 model requests and 9 successful REA calls; the report matched the known source. The first live attempts found that `gpt-5.5` is not offered to ChatGPT accounts and that real responses carry two fields the profile then lacked (`phase`, `logprobs`); both are now admitted as bounded data |
 

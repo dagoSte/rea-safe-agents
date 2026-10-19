@@ -11,7 +11,7 @@
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#requirements)
 [![Targets: POSIX Linux and macOS](https://img.shields.io/badge/Targets-POSIX_Linux_%7C_macOS-555)](docs/validation.md)
 [![Windows: Experimental](https://img.shields.io/badge/Windows-Experimental-orange)](skills/rea-isolated/references/windows-experimental.md)
-[![Native runtime verified: macOS, Linux pending](https://img.shields.io/badge/Native_runtime_verified-macOS_%C2%B7_Linux_pending-yellow)](docs/validation.md)
+[![Native runtime verified: Linux and macOS](https://img.shields.io/badge/Native_runtime_verified-Linux_%2B_macOS-2ea44f)](docs/validation.md)
 [![Live analysis: Claude and Codex subscriptions](https://img.shields.io/badge/Live_analysis-Claude_%2B_Codex_subscriptions-2ea44f)](docs/validation.md)
 
 **REA Safe Agent is a skill that builds a safer, contained environment for
@@ -51,6 +51,10 @@ and relays only the approved protocols.
 **Give your coding agent [SETUP.md](SETUP.md)** for the setup plan, installation
 and verification. Every npm, REA and analysis-client command stays in Docker.
 There is no host execution fallback or global MCP registration.
+
+## At a glance
+
+![How REA Safe Agent works: your files enter the REA container only as frozen, hash-approved copies; REA with Ghidra and the coding agent run in two containers without network; a trusted gateway relays only 22 approved tools and sends model requests over one fixed route with your own subscription; the report is saved privately](media/how-it-works.svg)
 
 ## When it helps
 
