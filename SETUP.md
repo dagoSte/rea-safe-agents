@@ -184,9 +184,13 @@ Instead of `--prompt-file`, `--template triage` (or `executable`, `javascript`,
 `archive`) uses a ready prompt over every selected file; `--target NAME`
 limits it to some of them.
 
-The agent's final report is saved as `report.md` in the output directory;
-`agent_container.py report --output DIRECTORY` prints it again. Treat it as
-untrusted text.
+The agent's final answer is saved as `report.md` in the output directory,
+with a header saying whether the client ended with it. If the transcript has no
+answer or the file cannot be written, `result.json` still records the completed
+analysis with `report_file: null` and the reason in `report_error`;
+`agent_container.py report --output DIRECTORY` writes and prints it again.
+Treat it as untrusted text, and view it as plain text or with raw HTML
+rendering turned off.
 
 Use a new private output directory. Each run starts fresh disposable containers
 with a tmpfs client home. The controller permits at most 32 model requests,

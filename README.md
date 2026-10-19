@@ -394,8 +394,12 @@ A template covers every selected file, one at a time; add `--target NAME`
 Claude turns and time, up to fixed caps (128 requests, 80 turns, 90 minutes).
 
 The selected files appear to the agent under `/input/`. The agent's final
-report is saved as **`report.md`** in the output folder, headed by the model,
-the REA calls and the isolation checks. Print it again, also for older runs:
+answer is saved as **`report.md`** in the output folder, headed by the model,
+the REA calls, the isolation checks and whether the client actually ended with
+that answer. When the transcript has no answer or the file cannot be written,
+`result.json` still records the completed analysis, with `report_file: null`
+and the reason in `report_error`. Print or write the report again, also for
+older runs:
 
 ```text
 python3 skills/rea-isolated/scripts/agent_container.py report --output ~/.rea-private/runs/first-claude
@@ -403,7 +407,8 @@ python3 skills/rea-isolated/scripts/agent_container.py report --output ~/.rea-pr
 
 `result.json` lists the REA calls and isolation checks, and
 `agent.stdout.jsonl` holds the full transcript. Treat the report as untrusted
-text: the model wrote it from a file you do not trust.
+text: the model wrote it from a file you do not trust. Read it in a text editor
+or a Markdown viewer that does not render raw HTML.
 
 **If something goes wrong**
 
@@ -474,13 +479,21 @@ refused.
 
 ### Reports you can read
 
-Every analysis now ends with **`report.md`** in its output folder: the
+A completed analysis now leaves **`report.md`** in its output folder: the
 model's final answer, headed by the model, the client and REA versions, the
-REA calls made and the isolation checks. Before, the answer had to be dug out
-of the JSON transcript. `agent_container.py report --output FOLDER` prints and
-rewrites it, also for runs made before this change. The text is cleaned of
-terminal control characters and bidirectional overrides, since the model
-wrote it from an untrusted file, and the file is private to your account.
+REA calls made, the isolation checks and whether the client ended with that
+answer (Claude Code's closing result, or a Codex message the provider marked
+final). Before, the answer had to be dug out of the JSON transcript.
+`agent_container.py report --output FOLDER` prints and rewrites it, also for
+runs made before this change. `result.json` is saved first, so a report that
+cannot be written never loses the analysis: it records `report_error` instead.
+
+The model wrote the text from an untrusted file, so terminal control
+characters are removed, and bidirectional controls and invisible characters
+are shown as `[U+XXXX]`. Header values read back from `result.json` appear only
+in their expected form. The file is written new, private to your account, and
+swapped in, so a link or special file placed at `report.md` is replaced, never
+written through.
 
 ### Weekly pinned-version check
 

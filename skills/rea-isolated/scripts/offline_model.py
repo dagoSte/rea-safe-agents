@@ -6,6 +6,10 @@ import json
 from agent_session import refusal_evidence
 from tunnel import MAX_BODY, decode_json, require
 
+# The closing answer of both clients. U+2028 checks that a separator inside a
+# JSONL string never splits a transcript record.
+FINAL_TEXT = "Offline verification completed.\u2028Second line of the final answer."
+
 
 def completed_calls(body):
     completed = set()
@@ -24,7 +28,7 @@ def response_bytes(client, body, actions, number):
         content = [{"type": "tool_use", "id": identifier, "name": name, "input": arguments}
                    for identifier, name, arguments in actions]
         if not content:
-            content = [{"type": "text", "text": "Offline verification completed."}]
+            content = [{"type": "text", "text": FINAL_TEXT}]
         initial = {"id": "msg_fixture_" + str(number), "type": "message", "role": "assistant",
                    "model": body.get("model", "offline"), "content": [], "stop_reason": None,
                    "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 0}}
@@ -46,6 +50,9 @@ def response_bytes(client, body, actions, number):
             if namespaced and name.startswith("mcp__rea__"):
                 item.update(namespace="mcp__rea", name=name.removeprefix("mcp__rea__"))
             output.append(item)
+        if not actions:
+            output.append({"id": "msg_fixture_" + str(number), "type": "message", "role": "assistant", "status": "completed",
+                           "phase": "final_answer", "content": [{"type": "output_text", "text": FINAL_TEXT, "annotations": []}]})
         response = {"id": "resp_fixture_" + str(number), "object": "response", "created_at": 0, "status": "completed",
                     "output": output, "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
         events = [("response.created", {"type": "response.created", "response": dict(response, status="in_progress", output=[])})]

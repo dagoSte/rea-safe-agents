@@ -18,6 +18,7 @@ import signal
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
@@ -45,6 +46,7 @@ EXTRA_REQUESTS, MAX_REQUESTS_CAP = 24, 128
 SESSION_TIMEOUT, EXTRA_TIMEOUT, MAX_TIMEOUT = 1800, 900, 5400
 PROMPTS = HERE.parents[1] / "prompts"
 MAX_OUTPUT_TOKENS = 32000
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 # One streamed model answer: long enough for MAX_OUTPUT_TOKENS, still inside the session budget.
 RESPONSE_TIMEOUT = 900
 # REA may answer with up to 10 MiB (its own budget); results are cut before relay.
@@ -563,13 +565,15 @@ class ModelGateway:
         require(type(max_requests) is int and 0 < max_requests <= MAX_REQUESTS_CAP, "Invalid model request budget")
         self.max_requests = max_requests
         self.catalogs = []
+        # Codex's transcript drops the provider's phase; the stream keeps it.
+        self.final_phase = None
         self.session = str(uuid.uuid4())
         if client == "claude":
             # Claude passes its own subscription login through; the gateway only
             # checks that requests carry exactly the login the user exported.
             require(isinstance(login, str) and profile.CLAUDE_LOGIN.fullmatch(login) is not None, "Claude needs the user's own setup-token login")
         if fixture_port is None:
-            require(isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model) is not None, "Select an explicit model ID")
+            require(isinstance(model, str) and MODEL_ID.fullmatch(model) is not None, "Select an explicit model ID")
             require(client == "claude" or isinstance(login, CodexLogin), "Codex needs the dedicated ChatGPT login")
 
     def exchange(self, frame, wire):
@@ -651,16 +655,37 @@ class ModelGateway:
                           if RESPONSE_HEADER.fullmatch(name.lower()) and re.fullmatch(r"[ -~]{0,200}", value)}
                 wire.send({"type": "model-start", "id": frame["id"], "status": response.status, "content_type": content_type,
                            "headers": dict(sorted(limits.items())[:32])})
-                total = 0
+                total, pending = 0, b""
+                watch = self.client == "codex" and content_type == "text/event-stream" and response.status == 200
                 while chunk := response.read1(16384):
                     require(time.monotonic() < deadline, "Model response exceeded time limit")
                     total += len(chunk)
                     require(total <= MAX_RESPONSE, "Model response exceeds byte limit")
+                    if watch:
+                        *lines, pending = (pending + chunk).split(b"\n")
+                        self.note_phase(lines)
                     wire.send({"type": "model-data", "id": frame["id"], "body": pack(chunk)})
+                if watch:
+                    self.note_phase([pending])
                 wire.send({"type": "model-end", "id": frame["id"]})
                 return
             finally:
                 connection.close()
+
+    def note_phase(self, lines):
+        """Record the phase the provider gave each completed assistant message, the last one winning."""
+        for line in lines:
+            if not line.startswith(b"data:"):
+                continue
+            try:
+                event = json.loads(line[5:])
+            except ValueError:
+                continue
+            item = event.get("item") if isinstance(event, dict) else None
+            if event.get("type") == "response.output_item.done" and isinstance(item, dict) \
+                    and item.get("type") == "message" and item.get("role") == "assistant":
+                phase = item.get("phase")
+                self.final_phase = phase if isinstance(phase, str) and re.fullmatch(r"[a-z_]{1,32}", phase) else None
 
 
 @contextlib.contextmanager
@@ -902,57 +927,119 @@ def run(args):
         if os.name != "nt":
             target.chmod(0o600)
     result.update(status="completed-contained-analysis", model=args.model, output_directory=str(output), targets=targets,
-                  template=args.template)
+                  template=args.template, report_file=None)
+    if config["client"] == "codex":
+        result["codex_final_phase"] = gateway.final_phase
+    # The completed analysis is recorded first, so a failed report cannot lose
+    # it; `report --output` can write the report again later.
+    replace_private(output / "result.json", json.dumps(result, indent=2) + "\n")
     try:
         result["report_file"] = str(write_report(output, result))
-    except ProtocolError:
-        result["report_file"] = None  # the transcripts stay available for diagnosis
-    profile.write_json(output / "result.json", result)
+    except (ProtocolError, OSError, ValueError) as exc:
+        result["report_error"] = type(exc).__name__ + ": " + readable(str(exc))[:500]
+    replace_private(output / "result.json", json.dumps(result, indent=2) + "\n")
     return result
 
 
-# Terminal control characters and bidirectional overrides: model text written
-# from an untrusted file must not drive a terminal or disguise what it says.
-UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+# Model text written from an untrusted file must not drive a terminal or hide
+# what it says. C0 and C1 controls go, except TAB and LF. Bidirectional
+# controls, invisible characters that can hide or reorder text, Unicode tags
+# and unpaired surrogates are shown as [U+XXXX]. Joiners, variation selectors
+# and soft hyphens stay: languages and emoji need them.
+CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+HIDDEN = re.compile("[\u061c\u115f\u1160\u180e\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069"
+                    "\u3164\ufeff\uffa0\ufff9-\ufffb\U000e0000-\U000e007f\ud800-\udfff]")
 
 
-def final_report(output):
-    """The model's final answer from a run's transcript (Claude Code or Codex)."""
-    text = None
-    for line in (output / "agent.stdout.jsonl").read_text(encoding="utf-8", errors="replace").splitlines():
+def readable(text):
+    return HIDDEN.sub(lambda match: "[U+{:04X}]".format(ord(match.group())), CONTROL.sub("", text))
+
+
+def final_answer(lines):
+    """The model's last message in a transcript, and how the client ended with it.
+
+    JSONL records end at LF only: U+2028, U+2029 and U+0085 may sit inside a
+    JSON string, so no other line separator splits a record.
+    """
+    text = ending = None
+    for raw in lines:
         try:
-            item = json.loads(line)
+            item = json.loads(raw.decode("utf-8", errors="replace"))
         except ValueError:
             continue
         if not isinstance(item, dict):
             continue
         if item.get("type") == "result" and isinstance(item.get("result"), str):  # Claude Code
             text = item["result"]
+            ending = "claude-success" if item.get("subtype") == "success" and item.get("is_error") is False else "claude-error"
         event = item.get("item")
         if item.get("type") == "item.completed" and isinstance(event, dict) and event.get("type") == "agent_message" \
                 and isinstance(event.get("text"), str):  # Codex
-            text = event["text"]
+            text, ending = event["text"], "codex"
     require(text is not None and text.strip() != "", "This run's transcript has no final report")
-    return UNSAFE_TEXT.sub("", text)
+    return readable(text), ending
+
+
+def final_report(output):
+    with (output / "agent.stdout.jsonl").open("rb") as handle:
+        return final_answer(handle)
+
+
+def shown(value, pattern):
+    """A value read back from result.json, shown only in its expected form."""
+    if value is None:
+        return "?"
+    return value if isinstance(value, str) and re.fullmatch(pattern, value) else "(invalid)"
+
+
+def closing(ending, result):
+    if ending == "claude-success":
+        return "Claude Code's successful closing result"
+    if ending == "claude-error":
+        return "NOT a successful closing result from Claude Code"
+    if "codex_final_phase" not in result:
+        return "not recorded for this run"
+    if result["codex_final_phase"] == "final_answer":
+        return "marked final by the provider"
+    return "NOT marked final by the provider; it may be an intermediate message"
 
 
 def write_report(output, result):
-    probes = result.get("agent_probe", {})
-    checks = "all {} passed".format(len(probes)) if probes and all(value is True for value in probes.values()) else "NOT all passed"
+    text, ending = final_report(output)
+    probes, calls, mounts = result.get("agent_probe"), result.get("completed_rea_calls"), result.get("agent_mount_count")
+    if not isinstance(probes, dict) or not probes:
+        checks = "?"
+    else:
+        checks = "all {} passed".format(len(probes)) if all(value is True for value in probes.values()) else "NOT all passed"
+    calls = ", ".join(calls) if isinstance(calls, list) and all(isinstance(call, str) and call in TOOLS for call in calls) else "(invalid)"
     lines = ["# REA Safe Agent analysis report", "",
-             "- Model: " + str(result.get("model", "?")),
-             "- Client: " + str(result.get("client_version", "?")) + ", REA " + str(result.get("rea_version", "?")),
-             "- REA calls: " + ", ".join(result.get("completed_rea_calls", [])),
-             "- Isolation checks: " + checks + "; container network " + str(result.get("both_containers_network", "?"))
-             + "; agent host mounts " + str(result.get("agent_mount_count", "?")), "",
+             "- Model: " + shown(result.get("model"), MODEL_ID.pattern),
+             "- Client: " + shown(result.get("client_version"), r"[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,63}")
+             + ", REA " + shown(result.get("rea_version"), r"[0-9A-Za-z][0-9A-Za-z.+-]{0,31}"),
+             "- Final answer: " + closing(ending, result),
+             "- REA calls: " + calls,
+             "- Isolation checks: " + checks + "; container network " + shown(result.get("both_containers_network"), r"[a-z]{1,16}")
+             + "; agent host mounts " + (str(mounts) if type(mounts) is int else "(invalid)"), "",
              "> Written by the model from REA's output about a file you do not trust.",
-             "> Treat it as untrusted text and verify any claim that matters.", "", "---", "", final_report(output)]
+             "> Treat it as untrusted text and verify any claim that matters.", "", "---", "", text]
     path = output / "report.md"
-    with os.fdopen(os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600), "w", encoding="utf-8") as handle:
-        handle.write("\n".join(lines).rstrip("\n") + "\n")
-    if os.name != "nt":
-        path.chmod(0o600)  # also when an older report.md had wider permissions
+    replace_private(path, readable("\n".join(lines).rstrip("\n") + "\n"))
     return path
+
+
+def replace_private(path, text):
+    """Write a new private file and swap it in: a link or special file at path is replaced, never written through."""
+    descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
 
 
 def report(args):

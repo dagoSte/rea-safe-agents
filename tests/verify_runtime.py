@@ -23,6 +23,7 @@ import zipfile
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/rea-isolated/scripts"
 sys.path.insert(0, str(SCRIPTS))
 import agent_container as pair
+from offline_model import FINAL_TEXT
 
 PAYLOAD = b"REA independent forward-test fixture only\n"
 EXPECTED = hashlib.sha256(PAYLOAD).hexdigest()
@@ -120,16 +121,22 @@ def verify(args):
             policy = RecordingPolicy()
             login = pair.profile.OFFLINE_CLAUDE_LOGIN if client == "claude" else None
             with pair.fixture(client, steps=STEPS, test_refusals=False) as server, patch.object(pair, "MCPPolicy", return_value=policy):
-                result, _ = pair.exercise(config, rea,
+                gateway = pair.ModelGateway(client, fixture_port=server.server_port, login=login)
+                result, transcripts = pair.exercise(config, rea,
                     prompt="Inspect /input/inert.zip and report the child SHA256, then list the strings of /input/native-fixture.",
-                    gateway=pair.ModelGateway(client, fixture_port=server.server_port, login=login), timeout=900, login=login)
+                    gateway=gateway, timeout=900, login=login)
             pair.require(policy.calls == [name for name, _ in STEPS] == result["completed_rea_calls"], "Actual REA dispatch sequence did not complete")
             pair.require(len(policy.results) == len(STEPS) and not any("error" in item or item.get("result", {}).get("isError") for item in policy.results), "REA analysis returned an error")
             pair.require(EXPECTED in json.dumps(policy.results[:3]), "Actual REA inventory did not contain the known child SHA256")
             pair.require(NATIVE_MARKER.decode() in json.dumps(policy.results[4]), "Ghidra did not recover the known native string")
+            # The report reads the transcript this pinned client actually wrote.
+            answer = pair.final_answer(bytes(transcripts["stdout"]).split(b"\n"))
+            pair.require(answer == (FINAL_TEXT, "codex" if client == "codex" else "claude-success"),
+                         "The report did not find the client's final answer")
+            pair.require(client == "claude" or gateway.final_phase == "final_answer", "The provider's final-answer phase was not recorded")
             reports.append({"client": client, "rea_profile": rea["profile"], "client_version": result["client_version"], "passed": True,
                             "completed_rea_calls": policy.calls, "child_sha256": EXPECTED, "native_string_recovered": True,
-                            "agent_probe": result["agent_probe"], "undeclared_tools_rejected": boundary_report["undeclared_tools_rejected"],
+                            "final_answer_extracted": True, "agent_probe": result["agent_probe"], "undeclared_tools_rejected": boundary_report["undeclared_tools_rejected"],
                             "model_requests": result["model_requests"], "real_provider_requests": 0})
         return {"host_os": sys.platform, "host_arch": platform.machine(), "rea_image_id": deployment["image_id"],
                 "agent_image_id": config["agent_image_id"], "clients": reports, "fixture_cleanup": "completed"}

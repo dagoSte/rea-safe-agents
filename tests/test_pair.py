@@ -9,6 +9,7 @@ import stat
 import sys
 import tarfile
 import tempfile
+import threading
 import subprocess
 from types import SimpleNamespace
 import unittest
@@ -17,6 +18,7 @@ from unittest.mock import patch
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills/rea-isolated/scripts"
 sys.path.insert(0, str(SCRIPTS))
 import agent_container as pair
+import offline_model
 import input_snapshot as snapshot
 import tunnel
 
@@ -401,51 +403,144 @@ class ControlRecordTests(unittest.TestCase):
 
 CLAUDE_TRANSCRIPT = "\n".join(json.dumps(item) for item in (
     {"type": "system", "subtype": "init"},
-    {"type": "result", "result": "draft"},
+    {"type": "result", "subtype": "success", "is_error": False, "result": "draft"},
     {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking aloud"}]}},
-    {"type": "result", "result": "Final \x1b[31mreport\x1b[0m \u202eevil\u202c with **Markdown**"})) + "\nnot json\n"
+    {"type": "result", "subtype": "success", "is_error": False,
+     "result": "Final \x1b[31mreport\x1b[0m \u202eevil\u202c with **Markdown**"})) + "\nnot json\n"
 CODEX_TRANSCRIPT = "\n".join(json.dumps(item) for item in (
     {"type": "item.completed", "item": {"type": "agent_message", "text": "I will open it."}},
     {"type": "item.completed", "item": {"type": "mcp_tool_call", "text": "tool output"}},
     {"type": "item.completed", "item": {"type": "agent_message", "text": "## Final Codex report"}}))
-COMPLETED = {"status": "completed-contained-analysis", "model": "model-x", "client_version": "client-y", "rea_version": "6.7.0",
+COMPLETED = {"status": "completed-contained-analysis", "model": "model-x", "client_version": "codex-cli 0.163.0", "rea_version": "6.7.0",
              "completed_rea_calls": ["open_binary", "close_binary"], "agent_probe": {"a": True, "b": True},
-             "both_containers_network": "none", "agent_mount_count": 0}
+             "both_containers_network": "none", "agent_mount_count": 0, "codex_final_phase": "final_answer"}
+
+
+def codex_transcript(final):
+    # The pinned Codex writes U+2028 and other separators literally, as json.dumps(ensure_ascii=False) does.
+    return "\n".join(json.dumps(item, ensure_ascii=False) for item in (
+        {"type": "thread.started", "thread_id": "t"}, {"type": "turn.started"},
+        {"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "I will open it."}},
+        {"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": final}},
+        {"type": "turn.completed", "usage": {}})) + "\n"
 
 
 class ReportTests(unittest.TestCase):
+    def folder(self, transcript, result=COMPLETED):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        output = Path(directory.name)
+        (output / "agent.stdout.jsonl").write_bytes(transcript.encode("utf-8", "surrogatepass"))
+        (output / "result.json").write_text(json.dumps(result))
+        return output
+
     def test_the_final_answer_is_taken_from_either_client_without_terminal_controls(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary)
-            (output / "agent.stdout.jsonl").write_text(CLAUDE_TRANSCRIPT)
-            text = pair.final_report(output)
-            self.assertTrue(text.startswith("Final ") and text.endswith("with **Markdown**"))
-            self.assertFalse(any(character in text for character in "\x1b\u202e\u202c"))
-            (output / "agent.stdout.jsonl").write_text(CODEX_TRANSCRIPT)
-            self.assertEqual(pair.final_report(output), "## Final Codex report")
-            (output / "agent.stdout.jsonl").write_text(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "  "}}))
-            with self.assertRaises(tunnel.ProtocolError):
-                pair.final_report(output)
+        output = self.folder(CLAUDE_TRANSCRIPT)
+        text, ending = pair.final_report(output)
+        self.assertEqual(text, "Final [31mreport[0m [U+202E]evil[U+202C] with **Markdown**")
+        self.assertEqual(ending, "claude-success")
+        (output / "agent.stdout.jsonl").write_text(CODEX_TRANSCRIPT)
+        self.assertEqual(pair.final_report(output), ("## Final Codex report", "codex"))
+        (output / "agent.stdout.jsonl").write_text(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "  "}}))
+        with self.assertRaises(tunnel.ProtocolError):
+            pair.final_report(output)
+
+    def test_records_end_at_line_feeds_only(self):
+        for separator, shown in (("\u2028", "\u2028"), ("\u2029", "\u2029"), ("\x85", "")):
+            with self.subTest(separator=hex(ord(separator))):
+                output = self.folder(codex_transcript("Final" + separator + "answer"))
+                self.assertEqual(pair.final_report(output), ("Final" + shown + "answer", "codex"))
+        lines = [b'{"type": "result", "subtype": "success", "is_error": false, "result": "split\\r"}\r', b"\r\n"]
+        self.assertEqual(pair.final_answer(lines), ("split", "claude-success"))  # CR is a control, not a separator
+
+    def test_hidden_and_reordering_characters_are_shown_and_language_is_kept(self):
+        for hidden in ("\u061c", "\u200b", "\u2060", "\ufeff", "\u2066", "\u180e", "\U000e0041", "\ud800"):
+            with self.subTest(character=hex(ord(hidden))):
+                self.assertEqual(pair.readable("a" + hidden + "b"), "a[U+{:04X}]b".format(ord(hidden)))
+        kept = "\u0645\u0631\u062d\u0628\u0627 \u05e9\u05dc\u05d5\u05dd \U0001f469\u200d\U0001f4bb \u2764\ufe0f co\u00adop \u200c\ttab\nline"
+        self.assertEqual(pair.readable(kept), kept)
+        self.assertEqual(pair.readable("\x1b]52;c;ZXZpbA==\x07 \x9b2J \x00\r"), "]52;c;ZXZpbA== 2J ")
+
+    def test_an_unpaired_surrogate_in_the_answer_still_gives_a_report(self):
+        output = self.folder(codex_transcript("ok").replace('"ok"', '"bad \\ud800 end"'))
+        text = pair.report(SimpleNamespace(output=str(output)))
+        self.assertTrue(text.rstrip().endswith("bad [U+D800] end"))
 
     def test_report_saves_a_private_file_with_its_provenance_and_a_warning(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary)
-            (output / "agent.stdout.jsonl").write_text(CODEX_TRANSCRIPT)
-            (output / "result.json").write_text(json.dumps(COMPLETED))
-            text = pair.report(SimpleNamespace(output=str(output)))
-            self.assertIn("- Model: model-x", text)
-            self.assertIn("- REA calls: open_binary, close_binary", text)
-            self.assertIn("all 2 passed", text)
-            self.assertIn("untrusted", text)
-            self.assertTrue(text.rstrip().endswith("## Final Codex report"))
-            self.assertEqual((output / "report.md").read_text(), text)
-            if os.name != "nt":
-                self.assertEqual((output / "report.md").stat().st_mode & 0o777, 0o600)
-            (output / "result.json").write_text(json.dumps(dict(COMPLETED, status="started")))
-            with self.assertRaises(tunnel.ProtocolError):
-                pair.report(SimpleNamespace(output=str(output)))
+        output = self.folder(CODEX_TRANSCRIPT)
+        text = pair.report(SimpleNamespace(output=str(output)))
+        self.assertIn("- Model: model-x\n", text)
+        self.assertIn("- Client: codex-cli 0.163.0, REA 6.7.0\n", text)
+        self.assertIn("- Final answer: marked final by the provider\n", text)
+        self.assertIn("- REA calls: open_binary, close_binary\n", text)
+        self.assertIn("all 2 passed; container network none; agent host mounts 0\n", text)
+        self.assertIn("untrusted", text)
+        self.assertTrue(text.rstrip().endswith("## Final Codex report"))
+        self.assertEqual((output / "report.md").read_text(), text)
+        if os.name != "nt":
+            self.assertEqual((output / "report.md").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sorted(path.name for path in output.iterdir()), ["agent.stdout.jsonl", "report.md", "result.json"])
+        (output / "result.json").write_text(json.dumps(dict(COMPLETED, status="started")))
+        with self.assertRaises(tunnel.ProtocolError):
+            pair.report(SimpleNamespace(output=str(output)))
 
-    def test_run_saves_the_report_and_survives_a_run_without_one(self):
+    def test_the_header_says_whether_the_client_ended_with_this_answer(self):
+        cases = ((CODEX_TRANSCRIPT, {}, "marked final by the provider"),
+                 (CODEX_TRANSCRIPT, {"codex_final_phase": "commentary"}, "NOT marked final by the provider"),
+                 (CODEX_TRANSCRIPT, {"codex_final_phase": None}, "NOT marked final by the provider"),
+                 (CODEX_TRANSCRIPT, {"codex_final_phase": "drop"}, "not recorded for this run"),
+                 (CLAUDE_TRANSCRIPT, {}, "Claude Code's successful closing result"),
+                 (CLAUDE_TRANSCRIPT.replace('"is_error": false', '"is_error": true'), {}, "NOT a successful closing result"))
+        for transcript, change, expected in cases:
+            with self.subTest(expected=expected, change=change):
+                result = {key: value for key, value in {**COMPLETED, **change}.items() if value != "drop"}
+                text = pair.report(SimpleNamespace(output=str(self.folder(transcript, result))))
+                self.assertIn("- Final answer: " + expected, text)
+
+    def test_metadata_read_back_is_shown_only_in_its_expected_form(self):
+        hostile = dict(COMPLETED, model="\x1b]52;c;ZXZpbA==\x07", client_version="x\n# Fake heading", rea_version=7,
+                       completed_rea_calls=["open_binary", "rm -rf /"], both_containers_network="none\x1b[2J",
+                       agent_mount_count="0", agent_probe={"a": "yes"})
+        text = pair.report(SimpleNamespace(output=str(self.folder(CODEX_TRANSCRIPT, hostile))))
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn("\n# Fake", text)
+        self.assertIn("- Model: (invalid)\n", text)
+        self.assertIn("- Client: (invalid), REA (invalid)\n", text)
+        self.assertIn("- REA calls: (invalid)\n", text)
+        self.assertIn("NOT all passed; container network (invalid); agent host mounts (invalid)\n", text)
+
+    def test_the_report_replaces_links_and_special_files_without_writing_through(self):
+        output = self.folder(CODEX_TRANSCRIPT)
+        with tempfile.TemporaryDirectory() as elsewhere:
+            outside = Path(elsewhere) / "outside.txt"
+            outside.write_text("keep")
+            if os.name != "nt":
+                outside.chmod(0o644)
+            os.link(outside, output / "report.md")
+            pair.report(SimpleNamespace(output=str(output)))
+            self.assertEqual(outside.read_text(), "keep")
+            self.assertEqual(outside.stat().st_nlink, 1)
+            if os.name != "nt":
+                self.assertEqual(outside.stat().st_mode & 0o777, 0o644)
+                (output / "report.md").unlink()
+                (output / "report.md").symlink_to(Path(elsewhere) / "created-through-link")
+                pair.report(SimpleNamespace(output=str(output)))
+                self.assertFalse((Path(elsewhere) / "created-through-link").exists())
+                (output / "report.md").unlink()
+                os.mkfifo(output / "report.md")
+                worker = threading.Thread(target=pair.report, args=(SimpleNamespace(output=str(output)),), daemon=True)
+                worker.start()
+                worker.join(timeout=20)
+                self.assertFalse(worker.is_alive())  # a FIFO is replaced, never opened
+            self.assertTrue(stat.S_ISREG((output / "report.md").lstat().st_mode))
+            self.assertIn("## Final Codex report", (output / "report.md").read_text())
+
+    def test_the_report_command_only_reads_private_folders(self):
+        for folder in (pair.HERE.parents[3] / "docs", pair.HERE.parents[3] / "docs" / ".." / "docs"):
+            with self.subTest(folder=str(folder)), self.assertRaises(tunnel.ProtocolError):
+                pair.report(SimpleNamespace(output=str(folder)))
+
+    def run_codex(self, transcript, *, fail_report=None, phase="final_answer"):
         class Login:
             def __init__(self, raw):
                 pass
@@ -453,27 +548,110 @@ class ReportTests(unittest.TestCase):
                 return self
             def __exit__(self, *exc):
                 return False
-        for transcript, saved in ((CODEX_TRANSCRIPT, True), ('{"type": "turn.failed"}', False)):
-            with self.subTest(saved=saved), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                config, prompt, output = root / "codex.json", root / "prompt.txt", root / "analysis"
-                prompt.write_text("Analyze /input/file")
-                pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
-                outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
-                with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": [{"path": "file", "size": 4}]}, {})), \
-                        patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
-                        patch.object(pair, "ModelGateway"), \
-                        patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(transcript.encode()), "stderr": bytearray()})):
-                    result = pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=str(prompt),
-                                                      output=str(output), codex_login=str(root / "login.json"), template=None, target=None))
+        real = os.replace
+        def replace(source, target):
+            # Fails after the new file was written, as a full disk or a vanished folder would.
+            if fail_report and Path(target).name == "report.md":
+                raise fail_report
+            return real(source, target)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        config, prompt, output = root / "codex.json", root / "prompt.txt", root / "analysis"
+        self._last_outputs = [output]
+        prompt.write_text("Analyze /input/file")
+        pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
+        outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model", "codex_final_phase")}
+        with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": [{"path": "file", "size": 4}]}, {})), \
+                patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
+                patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=phase)), \
+                patch.object(pair.os, "replace", side_effect=replace), \
+                patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(transcript.encode()), "stderr": bytearray()})):
+            result = pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=str(prompt),
+                                              output=str(output), codex_login=str(root / "login.json"), template=None, target=None))
+        self.assertEqual(json.loads((output / "result.json").read_text()), result)
+        return result, output
+
+    def test_run_saves_the_report_and_the_provider_phase(self):
+        result, output = self.run_codex(CODEX_TRANSCRIPT, phase="commentary")
+        self.assertEqual(result["status"], "completed-contained-analysis")
+        self.assertEqual(result["codex_final_phase"], "commentary")
+        self.assertEqual(Path(result["report_file"]).resolve(), (output / "report.md").resolve())
+        self.assertIn("- Final answer: NOT marked final by the provider", (output / "report.md").read_text())
+        self.assertNotIn("report_error", result)
+
+    def test_a_failed_report_never_loses_the_completed_analysis(self):
+        for transcript, failure, error in (('{"type": "turn.failed"}', None, "ProtocolError"),
+                                           (CODEX_TRANSCRIPT, OSError(28, "No space left on device"), "OSError")):
+            with self.subTest(error=error):
+                result, output = self.run_codex(transcript, fail_report=failure)
                 self.assertEqual(result["status"], "completed-contained-analysis")
-                if saved:
-                    self.assertEqual(Path(result["report_file"]).resolve(), (output / "report.md").resolve())
-                    self.assertIn("## Final Codex report", (output / "report.md").read_text())
-                else:
-                    self.assertIsNone(result["report_file"])
-                    self.assertFalse((output / "report.md").exists())
-                self.assertEqual(json.loads((output / "result.json").read_text())["report_file"], result["report_file"])
+                self.assertIsNone(result["report_file"])
+                self.assertTrue(result["report_error"].startswith(error + ": "))
+                self.assertFalse((output / "report.md").exists())
+                self.assertEqual([path.name for path in output.iterdir() if path.name.startswith(".")], [])
+                self.assertTrue((output / "agent.stdout.jsonl").exists())
+                if failure:  # the report can be written again once there is space
+                    self.assertIn("## Final Codex report", pair.report(SimpleNamespace(output=str(output))))
+
+    def test_the_completed_analysis_is_recorded_before_the_report_is_written(self):
+        with self.assertRaises(KeyboardInterrupt):  # interrupted while writing the report
+            self.run_codex(CODEX_TRANSCRIPT, fail_report=KeyboardInterrupt())
+        output = next(Path(path) for path in self._last_outputs)
+        recorded = json.loads((output / "result.json").read_text())
+        self.assertEqual(recorded["status"], "completed-contained-analysis")
+        self.assertIsNone(recorded["report_file"])
+
+
+class SSEResponse(Response):
+    def __init__(self, chunks):
+        super().__init__()
+        self.chunks = list(chunks)
+
+    def getheader(self, name, default=None):
+        return "text/event-stream"
+
+    def read1(self, size):
+        return self.chunks.pop(0) if self.chunks else b""
+
+
+class FinalPhaseTests(unittest.TestCase):
+    def stream(self, *items):
+        events = [{"type": "response.created", "response": {}}]
+        for item in items:
+            events += [{"type": "response.output_item.added", "item": dict(item, phase="final_answer")},
+                       {"type": "response.output_item.done", "item": item}]
+        events.append({"type": "response.completed", "response": {}})
+        return "".join("event: x\ndata: " + json.dumps(event) + "\n\n" for event in events).encode()
+
+    def exchange(self, gateway, body, size):
+        chunks = [body[index:index + size] for index in range(0, len(body), size)]
+        with patch.object(pair.http.client, "HTTPConnection") as connect:
+            connect.return_value.getresponse.return_value = SSEResponse(chunks)
+            wire = RecordingWire()
+            gateway.exchange(frame(id=gateway.requests + 1, body=tunnel.pack(json.dumps({"stream": True, "tools": catalog("codex")}).encode())), wire)
+        self.assertEqual(b"".join(tunnel.unpack(item["body"]) for item in wire.frames if item["type"] == "model-data"), body)
+
+    def test_the_offline_model_closes_with_a_marked_final_answer(self):
+        gateway = pair.ModelGateway("codex", fixture_port=1)
+        gateway.note_phase(offline_model.response_bytes("codex", {"tools": []}, [], 1).split(b"\n"))
+        self.assertEqual(gateway.final_phase, "final_answer")
+        for client in ("codex", "claude"):
+            self.assertIn(json.dumps(offline_model.FINAL_TEXT)[1:-1], offline_model.response_bytes(client, {"tools": []}, [], 1).decode())
+
+    def test_the_last_assistant_message_phase_is_recorded_across_chunk_boundaries(self):
+        message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "x"}]}
+        for size in (1, 7, 4096):
+            with self.subTest(chunk=size):
+                gateway = pair.ModelGateway("codex", fixture_port=1)
+                self.exchange(gateway, self.stream(dict(message, phase="commentary"), dict(message, phase="final_answer")), size)
+                self.assertEqual(gateway.final_phase, "final_answer")
+                self.exchange(gateway, self.stream({"type": "function_call", "name": "x"}), size)
+                self.assertEqual(gateway.final_phase, "final_answer")  # no new message: the last one still counts
+                self.exchange(gateway, self.stream(dict(message, phase="commentary")), size)
+                self.assertEqual(gateway.final_phase, "commentary")
+                self.exchange(gateway, self.stream(dict(message, phase="Final Answer\n")), size)
+                self.assertIsNone(gateway.final_phase)  # malformed or missing is never final
 
 
 class TemplateTests(unittest.TestCase):
@@ -542,7 +720,7 @@ class LargeProfileTests(unittest.TestCase):
             outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
             with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": self.INPUTS}, rea)), \
                     patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
-                    patch.object(pair, "ModelGateway") as gateway, \
+                    patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=None)) as gateway, \
                     patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(), "stderr": bytearray()})) as exercise:
                 try:
                     pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=None, template="triage", target=[target],
