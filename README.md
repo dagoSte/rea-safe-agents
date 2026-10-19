@@ -32,7 +32,11 @@ and repeat the verification checks.
 **Watch the 68-second overview:** what it is for, how the sandbox works and
 where its limits are.
 
-[![REA Safe Agent overview film: click to watch](media/rea-agent/poster.png)](media/rea-agent/rea-agent-explainer.mp4)
+https://github.com/user-attachments/assets/3d2b8b9f-f5da-4c90-b569-aa78a668c58e
+
+Full-quality [MP4](media/rea-agent/rea-agent-explainer.mp4) with
+[captions](media/rea-agent/rea-agent-explainer.srt) and the
+[scene-by-scene script](media/rea-agent/README.md).
 
 The skill guides **Codex** or **Claude Code** through setup and verification.
 The complete Docker workflow has passed on **Linux and macOS (POSIX)**.
