@@ -9,6 +9,11 @@ permissions:
   contents: read
   issues: write
 
+# Runs never overlap, so two of them cannot both create the issue.
+concurrency:
+  group: pinned-version-check
+  cancel-in-progress: false
+
 jobs:
   versions:
     runs-on: ubuntu-latest
@@ -20,27 +25,8 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Compare pinned versions with upstream releases
-        id: check
+      - name: Compare pins and reconcile the managed issue
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set +e
-          python tools/check_versions.py --markdown "$RUNNER_TEMP/versions.md"
-          echo "status=$?" >> "$GITHUB_OUTPUT"
-      - name: Open, update or close the review issue
-        env:
           GH_TOKEN: ${{ github.token }}
-          STATUS: ${{ steps.check.outputs.status }}
-        run: |
-          title='Pinned versions to review'
-          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
-          if [ "$STATUS" != "0" ]; then
-            if [ -n "$number" ]; then
-              gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/versions.md"
-            else
-              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/versions.md"
-            fi
-          elif [ -n "$number" ]; then
-            gh issue close "$number" --repo "$GITHUB_REPOSITORY" --comment "Every pinned version is current again."
-          fi
+        run: python tools/check_versions.py --markdown "$RUNNER_TEMP/versions.md" --sync-issue "$GITHUB_REPOSITORY"

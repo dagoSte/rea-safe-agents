@@ -428,13 +428,24 @@ Improvements since the first public release, newest first.
 ### Weekly pinned-version check
 
 REA Safe Agent pins exact versions of REA, Claude Code, Codex, Ghidra, the
-Temurin JDK and the Node base image, so a release is reproducible and every
-client version is reviewed before it is trusted. Pins also go stale. Every
-Monday a [workflow](.github/workflows/versions.yml) compares them with the
-upstream releases. When something is behind, it opens or updates one issue,
-**Pinned versions to review**, with the new versions and every file that still
-mentions the old ones; it closes the issue once everything is current. Ghidra
-is compared within the line REA verifies, and a newer line is only noted.
+Temurin JDK and the Node base image, so every build uses a reviewed, recorded
+set of versions and every client version is reviewed before it is trusted.
+Pins also go stale. Every Monday a [workflow](.github/workflows/versions.yml)
+compares them with the upstream releases:
+
+- Ghidra is compared within the line REA verifies; a newer line is only noted.
+- The Node image digest is compared with the tag's current digest, because a
+  tag can be rebuilt without a new version number.
+- Lockfiles, the reviewed-client constants and the image tags must agree with
+  the pins; a half-finished update is reported, not taken as current.
+- Prereleases and malformed answers are reported as "could not check", never
+  as current. Redirects are refused, so the workflow token cannot follow one.
+
+While anything is behind, inconsistent or uncheckable, one labelled issue,
+**Pinned versions to review**, lists it with every file that still mentions
+the old version; dated records such as the validation log are listed apart
+and left as history. The issue closes once everything is current. Runs never
+overlap, and an issue someone else opened with the same title is never touched.
 
 Run the same check locally with `python3 tools/check_versions.py`. It never
 changes a pin: an update stays a reviewed change, with a new checksum or
