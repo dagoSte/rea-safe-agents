@@ -124,7 +124,7 @@ def verify(args):
                 gateway = pair.ModelGateway(client, fixture_port=server.server_port, login=login)
                 result, transcripts = pair.exercise(config, rea,
                     prompt="Inspect /input/inert.zip and report the child SHA256, then list the strings of /input/native-fixture.",
-                    gateway=gateway, timeout=900, login=login)
+                    gateway=gateway, timeout=900, login=login, tool_timeout=pair.boundary.PROFILES[resources]["tool_timeout"])
             pair.require(policy.calls == [name for name, _ in STEPS] == result["completed_rea_calls"], "Actual REA dispatch sequence did not complete")
             pair.require(len(policy.results) == len(STEPS) and not any("error" in item or item.get("result", {}).get("isError") for item in policy.results), "REA analysis returned an error")
             pair.require(EXPECTED in json.dumps(policy.results[:3]), "Actual REA inventory did not contain the known child SHA256")

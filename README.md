@@ -455,10 +455,13 @@ Improvements since the first public release, newest first.
 ### Large binaries
 
 `container.py configure --profile large` gives REA 5 GB of memory, 4 CPUs, 256
-processes and a 2 GB `/tmp`, with a 2 GB Ghidra heap and up to 840 seconds for
-Ghidra's first analysis, just under the clients' 900-second tool timeout. On
-the standard profile a 25 MB library filled the 256 MB `/tmp`, and the
-analysis failed after minutes of work. Pairing now lists selected files above
+processes and a 2 GB `/tmp`, with a 2 GB Ghidra heap and up to 29 minutes for
+Ghidra's first analysis; the clients then wait up to 30 minutes for one REA
+call, and the session gets 30 more minutes per large file. On the standard
+profile a 25 MB library filled the 256 MB `/tmp` and the analysis failed after
+minutes of work. On the large profile its first analysis took 14 minutes and
+peaked at 3.9 GiB of memory and 542 MiB of `/tmp`; full string and procedure
+listings exceeded REA's own response limit, and searches worked. Pairing now lists selected files above
 8 MB, and a run refuses them on the standard profile before any model request.
 On the large profile the prompt starts with advice for the model: wait for the
 first analysis, begin with `binary_overview`, and search instead of listing,

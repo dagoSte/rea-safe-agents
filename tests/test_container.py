@@ -72,14 +72,14 @@ class ContainerPolicyTests(unittest.TestCase):
                 boundary.validate_config({**self.config, "profile": profile})
         args = boundary.create_args(large, "mcp")
         for expected in ("--memory=5120m", "--memory-swap=5120m", "--cpus=4", "--pids-limit=256",
-                         "--env=GHIDRA_HEADLESS_MAXMEM=2G", "--env=REA_GHIDRA_STARTUP_TIMEOUT_MS=840000"):
+                         "--env=GHIDRA_HEADLESS_MAXMEM=2G", "--env=REA_GHIDRA_STARTUP_TIMEOUT_MS=1740000"):
             self.assertIn(expected, args)
         self.assertIn("/tmp:rw,nosuid,nodev,noexec,mode=1777,size=2g", args)
         standard = boundary.create_args(self.config, "mcp")
         self.assertIn("--memory=2048m", standard)
         self.assertFalse(any(arg.startswith("--env=") and arg != "--env=HOME=/home/node" for arg in standard))
         data = approved(large)
-        data["Config"]["Env"] += ["GHIDRA_HEADLESS_MAXMEM=2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS=840000"]
+        data["Config"]["Env"] += ["GHIDRA_HEADLESS_MAXMEM=2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS=1740000"]
         data["HostConfig"].update(Memory=5 * 1024**3, MemorySwap=5 * 1024**3, NanoCpus=4 * 10**9, PidsLimit=256,
                                   Tmpfs=dict(boundary.PROFILES["large"]["tmpfs"]))
         self.assertEqual(boundary.verify_container(large, data, "mcp", ENV)["profile"], "large")

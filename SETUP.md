@@ -70,8 +70,9 @@ python3 skills/rea-isolated/scripts/container.py setup-plan --config /absolute/p
 ```
 
 For a selected file above 8 MB add `--profile large`: REA gets 5 GB of memory,
-4 CPUs, 256 processes and a 2 GB `/tmp`, Ghidra a 2 GB heap and up to 840
-seconds for its first analysis. Docker needs at least 8 GB for both
+4 CPUs, 256 processes and a 2 GB `/tmp`, Ghidra a 2 GB heap and up to 29
+minutes for its first analysis, the clients 30 minutes per REA call, and the
+session 30 more minutes per large file. Docker needs at least 8 GB for both
 containers. Pairing reports files that need it, and a run refuses them on the
 standard profile before any model request.
 

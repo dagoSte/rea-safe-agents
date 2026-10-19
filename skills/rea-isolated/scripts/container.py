@@ -32,14 +32,15 @@ TMPFS = {
 }
 # Resource profiles for the REA container; the agent container always uses the
 # standard limits. Measured peaks: 0.8 GB for a 16 KB executable, 1.3 GB for
-# a 3.8 MB one. A 25 MB library fills the standard /tmp and needs the large
-# profile; its Ghidra startup also needs more than REA's default 330 s.
+# a 3.8 MB one. A 25 MB library fills the standard /tmp; on the large profile
+# its first Ghidra analysis took 830 s and peaked at 3.9 GiB and 542 MiB of /tmp.
+# tool_timeout is the clients' limit for one REA call, in seconds; Ghidra's
+# startup limit stays below it, so REA reports its own timeout first.
 PROFILES = {
-    "standard": {"memory": MEMORY, "cpus": CPUS, "pids": PIDS, "tmpfs": TMPFS, "env": {}},
+    "standard": {"memory": MEMORY, "cpus": CPUS, "pids": PIDS, "tmpfs": TMPFS, "env": {}, "tool_timeout": 900},
     "large": {"memory": 5 * 1024**3, "cpus": 4 * 10**9, "pids": 256,
               "tmpfs": {**TMPFS, "/tmp": "rw,nosuid,nodev,noexec,mode=1777,size=2g"},
-              # Below the clients' 900 s tool timeout, so REA reports its own timeout first.
-              "env": {"GHIDRA_HEADLESS_MAXMEM": "2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS": "840000"}},
+              "env": {"GHIDRA_HEADLESS_MAXMEM": "2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS": "1740000"}, "tool_timeout": 1800},
 }
 LARGE_INPUT = 8 * 1024 * 1024  # files above this size need the large profile
 MODES = {
@@ -377,7 +378,7 @@ def main():
     setup.add_argument("--context", required=True)
     setup.add_argument("--output", required=True)
     setup.add_argument("--profile", choices=sorted(PROFILES), default="standard",
-                       help="REA resources: large gives 5 GB, 4 CPUs and a 2 GB /tmp for binaries above 8 MB")
+                       help="REA resources: large gives 5 GB, 4 CPUs, a 2 GB /tmp and 29 minutes for Ghidra's first analysis, for binaries above 8 MB")
     for operation in [*MODES, "probe"]:
         p = sub.add_parser(operation)
         p.add_argument("--config", required=True)

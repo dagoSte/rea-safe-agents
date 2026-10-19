@@ -687,6 +687,8 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(pair.budgets(["a"]), (pair.MAX_REQUESTS, 20, pair.SESSION_TIMEOUT))
         self.assertEqual(pair.budgets(["a", "b", "c"]), (pair.MAX_REQUESTS + 48, 50, pair.SESSION_TIMEOUT + 1800))
         self.assertEqual(pair.budgets(["x"] * 50), (pair.MAX_REQUESTS_CAP, 80, pair.MAX_TIMEOUT))
+        self.assertEqual(pair.budgets(["a", "b"], ["b"]), (pair.MAX_REQUESTS + 24, 35, pair.SESSION_TIMEOUT + 900 + pair.LARGE_TIMEOUT))
+        self.assertEqual(pair.budgets(["x"] * 50, ["x"] * 50)[2], pair.MAX_LARGE_TIMEOUT)
 
     def test_the_gateway_enforces_its_request_budget(self):
         gateway = pair.ModelGateway("codex", fixture_port=1, max_requests=2)
@@ -730,6 +732,9 @@ class LargeProfileTests(unittest.TestCase):
                     exercise.assert_not_called()
                     return str(exc)
                 started = json.loads((root / "analysis/started.json").read_text())
+                self.assertEqual(exercise.call_args.kwargs["tool_timeout"], started["tool_timeout"])
+                self.assertEqual(exercise.call_args.kwargs["timeout"], started["timeout"])
+                self.last_started = started
                 return exercise.call_args.kwargs["prompt"], started["rea_profile"]
 
     def test_large_targets_need_the_large_profile_before_any_request(self):
@@ -742,6 +747,17 @@ class LargeProfileTests(unittest.TestCase):
         self.assertTrue(prompt.startswith(pair.LARGE_GUIDANCE))
         self.assertIn("- /input/libbig.so", prompt)
         self.assertEqual(profile, "large")
+        self.assertEqual(self.last_started["tool_timeout"], 1800)
+        self.assertEqual(self.last_started["timeout"], pair.SESSION_TIMEOUT + pair.LARGE_TIMEOUT)
+
+    def test_ghidra_reports_its_own_timeout_before_the_clients_give_up(self):
+        for name, limits in pair.boundary.PROFILES.items():
+            with self.subTest(profile=name):
+                startup = int(limits["env"].get("REA_GHIDRA_STARTUP_TIMEOUT_MS", "330000")) / 1000  # REA's default
+                self.assertLess(startup, limits["tool_timeout"])
+                self.assertLessEqual(limits["tool_timeout"], pair.profile.MAX_TOOL_TIMEOUT)
+        # The large profile leaves headroom over the 830 s measured for a 25 MB library.
+        self.assertGreaterEqual(int(pair.boundary.PROFILES["large"]["env"]["REA_GHIDRA_STARTUP_TIMEOUT_MS"]), 2 * 830_000)
 
     def test_files_up_to_the_threshold_keep_the_standard_profile_and_prompt(self):
         for rea in ({}, {"profile": "large"}):
@@ -749,6 +765,8 @@ class LargeProfileTests(unittest.TestCase):
                 prompt, profile = self.run_with(rea, "small.bin")
                 self.assertNotIn(pair.LARGE_GUIDANCE, prompt)
                 self.assertEqual(profile, rea.get("profile", "standard"))
+                self.assertEqual(self.last_started["tool_timeout"], pair.boundary.PROFILES[profile]["tool_timeout"])
+                self.assertEqual(self.last_started["timeout"], pair.SESSION_TIMEOUT)
 
     def test_configure_recommends_the_large_profile_for_large_selections(self):
         image = {"Id": IMAGE, "Os": "linux", "Config": {"Entrypoint": pair.AGENT_ENTRY, "User": "node"}}

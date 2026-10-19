@@ -159,8 +159,9 @@ class Gateway(http.server.BaseHTTPRequestHandler):
 
 def run():
     start = read_frame(sys.stdin.buffer)
-    require(start is not None and set(start) == {"type", "client", "prompt", "login", "turns"} and start["type"] == "start", "Invalid worker start")
-    client, prompt, login, turns = start["client"], start["prompt"], start["login"], start["turns"]
+    require(start is not None and set(start) == {"type", "client", "prompt", "login", "turns", "tool_timeout"} and start["type"] == "start",
+            "Invalid worker start")
+    client, prompt, login, turns, tool_timeout = start["client"], start["prompt"], start["login"], start["turns"], start["tool_timeout"]
     require(client in profile.REVIEWED and isinstance(prompt, str) and 0 < len(prompt.encode()) <= 128 * 1024, "Invalid client or prompt")
     # Claude receives the user's own login in its process environment only;
     # Codex never holds one, because the host gateway authenticates it.
@@ -232,14 +233,14 @@ def run():
     session = {"client": client, "executable": executable}
     argv, env = profile.command(root, session, [sys.executable, str(HERE), "mcp-relay"],
                                 mock_url="http://127.0.0.1:" + str(server.server_port),
-                                prompt="Analysis task:\n" + prompt, login=login, max_turns=turns)
+                                prompt="Analysis task:\n" + prompt, login=login, max_turns=turns, tool_timeout=tool_timeout)
     if client == "codex":
         config_path = Path(env["CODEX_HOME"]) / "config.toml"
         # Pre-approve only the contained static tools admitted by the separate
         # broker. Global approval_policy=never and disabled host tools stay set.
         # The first native query starts Ghidra; results arrive already bounded
         # by the broker, so the token budget only prevents a second, silent cut.
-        additions = ["enabled_tools = " + json.dumps(sorted(STATIC_TOOLS)), "tool_timeout_sec = " + str(profile.TOOL_TIMEOUT)]
+        additions = ["enabled_tools = " + json.dumps(sorted(STATIC_TOOLS)), "tool_timeout_sec = " + str(tool_timeout)]
         for name in sorted(STATIC_TOOLS):
             additions += ["[mcp_servers.rea.tools." + name + "]", 'approval_mode = "approve"', "output_token_limit = 60000"]
         with config_path.open("a", encoding="utf-8") as handle:

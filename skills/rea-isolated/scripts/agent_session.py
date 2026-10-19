@@ -25,6 +25,7 @@ CODEX_OFF = (
 REVIEWED = {"codex": "codex-cli 0.163.0", "claude": "2.1.302 (Claude Code)"}
 # Seconds one REA call may run; the first native query starts Ghidra.
 TOOL_TIMEOUT = 900
+MAX_TOOL_TIMEOUT = 1800  # the large REA profile; the controller sets the actual value
 MAX_TURNS = 100  # upper bound for Claude's agentic turns; the controller sets the actual value
 # Claude signs in with the user's own `claude setup-token` login. Offline checks
 # use this inert value, which the localhost fixture never forwards anywhere.
@@ -146,8 +147,9 @@ def check_mock_url(value):
             and not parsed.query and not parsed.fragment, "Offline provider must be localhost")
 
 
-def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None, max_turns=20):
+def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None, max_turns=20, tool_timeout=TOOL_TIMEOUT):
     require(type(max_turns) is int and 0 < max_turns <= MAX_TURNS, "Invalid turn budget")
+    require(type(tool_timeout) is int and 0 < tool_timeout <= MAX_TOOL_TIMEOUT, "Invalid tool timeout")
     client = session["client"]
     env, config_dir = environment(root, client)
     # "--" ends option parsing, so a prompt starting with "-" stays a prompt.
@@ -164,7 +166,7 @@ def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None, max
         args = [session["executable"], "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-rules", "--strict-config", "--json", "--", prompt]
     else:
         mcp_path = Path(root) / "mcp.json"
-        write_json(mcp_path, {"mcpServers": {"rea": {"command": mcp[0], "args": mcp[1:], "timeout": TOOL_TIMEOUT * 1000}}})
+        write_json(mcp_path, {"mcpServers": {"rea": {"command": mcp[0], "args": mcp[1:], "timeout": tool_timeout * 1000}}})
         # Bare mode ignores subscription logins. The explicit flags keep the
         # same minimal profile: no built-in tools, settings, hooks or commands.
         args = [session["executable"], "--tools", "", "--strict-mcp-config", "--mcp-config", str(mcp_path),

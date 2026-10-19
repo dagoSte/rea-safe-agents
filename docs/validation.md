@@ -2,6 +2,26 @@
 
 Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT subscriptions on macOS ARM64.
 
+## 2026-10-19 increment: large binaries
+
+One REA session per binary, through the production controller and container
+policy on native macOS ARM64 (Docker Desktop: 8 CPUs, 7.75 GiB). Calls:
+`open_binary`, `binary_overview`, `list_strings`, `list_procedures`,
+`search_strings`, `close_binary`. Peaks were sampled every 1.5 s.
+
+| Binary | Profile | First analysis | Peak memory | Peak `/tmp` | Result |
+| --- | --- | --- | --- | --- | --- |
+| 16 KB ELF fixture | standard | 12 s | 792 MiB | 12 MiB | All calls passed |
+| 3.8 MB ELF (`decompile`) | standard | 116 s | 1,268 MiB | 118 MiB | All calls passed |
+| 25 MB `libjvm.so` | standard | failed after 33 s | 1,464 MiB | 256 MiB (full) | `execution_failure`: the tmpfs was full |
+| 25 MB `libjvm.so` | 4 GiB, 2 GiB `/tmp`, REA's 330 s default | timed out at 330 s | 3,172 MiB | 388 MiB | `provider_timeout` |
+| 25 MB `libjvm.so` | large | 830 s | 3,952 MiB | 542 MiB | Overview and search passed; full string and procedure listings exceed REA's stdio response limit (`resource_constraint`) |
+
+The large profile therefore allows 1,740 s for the first analysis, about
+twice the measured time, and the clients 1,800 s per REA call. The runtime
+check runs Claude against the large profile and Codex against the standard one;
+both passed locally and in public CI.
+
 ## 2026-10-19 increment: native analysis, bounded results, subscription logins
 
 This increment adds Ghidra 12.1.4 to the REA image, exposes 16 read-only native

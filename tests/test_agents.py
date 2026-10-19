@@ -145,6 +145,20 @@ class AgentBoundaryTests(unittest.TestCase):
                 with self.subTest(turns=turns), self.assertRaises(agent.BoundaryError):
                     agent.command(root, session, mcp, max_turns=turns, **options)
 
+    def test_the_tool_timeout_is_set_by_the_controller_within_a_cap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = {"client": "claude", "executable": "/trusted/client"}
+            mcp = agent.mcp_command(root / "deployment.json")
+            options = {"mock_url": "http://127.0.0.1:12345", "login": agent.OFFLINE_CLAUDE_LOGIN}
+            for value, expected in ((None, 900_000), (1800, 1_800_000)):
+                agent.command(root, session, mcp, **options, **({} if value is None else {"tool_timeout": value}))
+                server = json.loads((root / "mcp.json").read_text())["mcpServers"]["rea"]
+                self.assertEqual(server["timeout"], expected)  # per call, overriding MCP_TOOL_TIMEOUT
+            for value in (0, agent.MAX_TOOL_TIMEOUT + 1, "900", 900.0):
+                with self.subTest(value=value), self.assertRaises(agent.BoundaryError):
+                    agent.command(root, session, mcp, tool_timeout=value, **options)
+
     def test_prompt_cannot_be_parsed_as_a_client_option(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

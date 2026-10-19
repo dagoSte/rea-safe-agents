@@ -44,6 +44,8 @@ AGENT_ENTRY = ["python3", "/opt/rea-sandbox/agent_worker.py"]
 MAX_REQUESTS = 32  # model requests for one target; more targets raise it up to MAX_REQUESTS_CAP
 EXTRA_REQUESTS, MAX_REQUESTS_CAP = 24, 128
 SESSION_TIMEOUT, EXTRA_TIMEOUT, MAX_TIMEOUT = 1800, 900, 5400
+# Each large target adds the time its first Ghidra analysis may take.
+LARGE_TIMEOUT, MAX_LARGE_TIMEOUT = 1800, 14400
 PROMPTS = HERE.parents[1] / "prompts"
 MAX_OUTPUT_TOKENS = 32000
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -704,7 +706,7 @@ def fixture(client, *, steps=None, test_refusals=True):
         thread.join(timeout=2)
 
 
-def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, diagnostics=None):
+def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, tool_timeout=profile.TOOL_TIMEOUT, diagnostics=None):
     boundary.preflight(rea)
     temporary, snapshot = input_snapshot.stage(rea["input_dir"], config["inputs"])
     managed = Containers(rea)
@@ -746,7 +748,8 @@ def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, dia
         for target, process in ((read_agent, agent_process), (read_rea, rea_process),
                                 (drain_errors, agent_process), (drain_errors, rea_process)):
             threading.Thread(target=target, args=(process,), daemon=True).start()
-        wire.send({"type": "start", "client": config["client"], "prompt": prompt, "login": login, "turns": turns})
+        wire.send({"type": "start", "client": config["client"], "prompt": prompt, "login": login, "turns": turns,
+                   "tool_timeout": tool_timeout})
         deadline, frames = time.monotonic() + timeout, 0
         gateway.deadline = deadline
         while done is None:
@@ -866,17 +869,18 @@ def build_prompt(args, config):
     return prompt, targets
 
 
-def budgets(targets):
+def budgets(targets, large=()):
     """Each extra file gets more model requests, Claude turns and time, within fixed caps."""
     extra = len(targets) - 1
+    timeout = min(SESSION_TIMEOUT + EXTRA_TIMEOUT * extra, MAX_TIMEOUT)
     return (min(MAX_REQUESTS + EXTRA_REQUESTS * extra, MAX_REQUESTS_CAP), min(20 + 15 * extra, 80),
-            min(SESSION_TIMEOUT + EXTRA_TIMEOUT * extra, MAX_TIMEOUT))
+            min(timeout + LARGE_TIMEOUT * len(large), MAX_LARGE_TIMEOUT))
 
 
 # Put before the analysis prompt when a target is large: the first Ghidra
 # analysis takes minutes, and full listings of a large binary are cut.
-LARGE_GUIDANCE = ("These files are large. The first Ghidra analysis of each one can take several minutes; wait for "
-                  "its result instead of opening the file again. Start with binary_overview, then prefer "
+LARGE_GUIDANCE = ("These files are large. The first Ghidra analysis of each one can take a quarter of an hour or more; "
+                  "wait for its result instead of opening the file again. Start with binary_overview, then prefer "
                   "search_strings, search_procedures and procedure_info with specific patterns over list_strings "
                   "and list_procedures, whose full results are cut to their first 200 KB.\n\n")
 
@@ -899,7 +903,8 @@ def run(args):
         require(rea.get("profile") == "large", "Files above 8 MB need the large REA profile: " + ", ".join(large)
                 + ". Configure REA again with --profile large, then pair and verify")
         prompt = LARGE_GUIDANCE + prompt
-    requests, turns, timeout = budgets(targets)
+    requests, turns, timeout = budgets(targets, large)
+    tool_timeout = boundary.profile_of(rea)["tool_timeout"]
     output = private_output(args.output)
     require(not output.exists(), "Use a new private output directory for every fresh contained session")
     if config["client"] == "claude":
@@ -917,10 +922,11 @@ def run(args):
         output.mkdir(mode=0o700, parents=True)
         profile.write_json(output / "started.json", {"identity": identity(path, config), "model": args.model, "targets": targets,
                                                      "template": args.template, "rea_profile": rea.get("profile", "standard"),
-                                                     "max_requests": requests, "max_turns": turns, "timeout": timeout})
+                                                     "max_requests": requests, "max_turns": turns, "timeout": timeout,
+                                                     "tool_timeout": tool_timeout})
         # A failed run still leaves its transcripts in the private output directory.
         result, transcripts = exercise(config, rea, prompt=prompt, gateway=gateway, timeout=timeout, login=login, turns=turns,
-                                       diagnostics=output / "failed")
+                                       tool_timeout=tool_timeout, diagnostics=output / "failed")
     for channel, data in transcripts.items():
         target = output / ("agent." + channel + ".jsonl")
         target.write_bytes(data)

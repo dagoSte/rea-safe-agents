@@ -103,7 +103,8 @@ arm64 natives are compiled with Debian bookworm's GCC 12 (`g++` and `make`
 pinned), whose point releases follow Debian security updates. Ghidra projects
 live in REA's bounded tmpfs. The standard profile analyzes binaries of a few
 megabytes; the large profile (5 GiB, 4 CPUs, 256 processes, 2 GiB `/tmp`, a
-2 GiB Ghidra heap and an 840-second first analysis) is required above 8 MB,
+2 GiB Ghidra heap, a 1,740-second first analysis and a 1,800-second client
+tool timeout) is required above 8 MB,
 and runs refuse such files on the standard profile. Its limits and settings
 are inspected exactly like the standard ones, and the agent container keeps
 the standard limits.
