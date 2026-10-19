@@ -641,7 +641,11 @@ REA does the analysis; our skill guides the creation and verification of the
 contained environment for REA and the agent receiving its results.
 
 This repository contains the launcher, skill, references and
-[original project branding](docs/branding.md). Upstream REA, agent clients and
+[original project branding](docs/branding.md). Original project code and
+documentation are available under the [MIT license](LICENSE).
+See [Contributing](CONTRIBUTING.md) for development and testing instructions,
+and [Security](SECURITY.md) for private vulnerability reporting.
+Upstream REA, agent clients and
 their dependencies retain their own licenses.
 
 ## Star History
