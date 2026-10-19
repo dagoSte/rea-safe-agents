@@ -1,6 +1,8 @@
 # REA Safe Agent
 
-<img src="skills/rea-isolated/assets/rea-safe-agent-logo.png" alt="REA Safe Agent: connected code and analysis modules" width="400">
+<p align="center">
+  <img src="skills/rea-isolated/assets/rea-safe-agent-logo.png" alt="REA Safe Agent: connected code and analysis modules" width="400">
+</p>
 
 [![Sandbox: two Docker containers](https://img.shields.io/badge/Sandbox-two_Docker_containers-2496ED?logo=docker&logoColor=white)](#how-the-sandbox-works)
 [![Agent tools: restricted](https://img.shields.io/badge/Agent_tools-restricted-2ea44f)](skills/rea-isolated/references/clients.md)
@@ -13,6 +15,8 @@
 [![Windows: Experimental](https://img.shields.io/badge/Windows-Experimental-orange)](skills/rea-isolated/references/windows-experimental.md)
 [![Native runtime verified: Linux and macOS](https://img.shields.io/badge/Native_runtime_verified-Linux_%2B_macOS-2ea44f)](docs/validation.md)
 [![Live analysis: Claude and Codex subscriptions](https://img.shields.io/badge/Live_analysis-Claude_%2B_Codex_subscriptions-2ea44f)](docs/validation.md)
+
+**[Quick start](#quick-start)** · [At a glance](#at-a-glance) · [When it helps](#when-it-helps) · [How it works](#how-the-sandbox-works) · [Tools](#available-analysis-tools) · [Step-by-step setup](#step-by-step-setup) · [Security](#security-controls-and-scope) · [Validation](#validation) · [Credits](#credits-and-upstream-rea)
 
 **REA Safe Agent is a skill that builds a safer, contained environment for
 analyzing files with REA.**
@@ -38,6 +42,45 @@ Full-quality [MP4](media/rea-agent/rea-agent-explainer.mp4) with
 [captions](media/rea-agent/rea-agent-explainer.srt) and the
 [scene-by-scene script](media/rea-agent/README.md).
 
+## Quick start
+
+Copy this prompt into Codex or Claude Code. The agent reads the guide, checks
+your machine and shows you the plan before installing anything:
+
+```text
+Set up REA Safe Agent from:
+https://github.com/dagoSte/rea-safe-agents
+
+Read SETUP.md, the bundled SKILL.md, the security model and the validation
+record. Use this project to analyze untrusted files while containing REA and
+the receiving client, limiting shared data and repeating the verification
+checks.
+
+Inspect my environment and show the concrete setup plan. Reuse existing
+approvals and matching verified artifacts. Request approval only for work
+that is not already authorized.
+
+Keep REA, npm and the receiving agent inside separate restricted Docker
+containers. Preserve network=none, read-only roots, resource limits and the
+22-tool MCP allowlist. The agent must have zero host mounts. Share only
+frozen copies of explicitly selected input bytes with REA.
+
+For live analysis, use my own subscription: a `claude setup-token` login
+for Claude, or a dedicated ChatGPT login made with `codex-login` for Codex.
+Never use API keys, and never reuse my everyday Codex login.
+
+Keep private control files, selected inputs, logins and outputs out of Git
+and webroots. Preserve existing global client settings. Never attach REA to
+this privileged host conversation or fall back to host execution.
+
+Verify the policy suite, isolation checks and real offline REA analysis
+without any model login. Report actual results, image IDs, successful REA
+calls, rejected host tools, cleanup and remaining gaps. Claim native
+platform coverage only for the host that was actually tested.
+```
+
+Prefer to do it by hand? Follow the [step-by-step setup](#step-by-step-setup).
+
 The skill guides **Codex** or **Claude Code** through setup and verification.
 The complete Docker workflow has passed on **Linux and macOS (POSIX)**.
 
@@ -52,9 +95,8 @@ has **zero host mounts**; each agent uses its owner's own subscription and no
 API key. A small trusted host controller checks both containers before startup
 and relays only the approved protocols.
 
-**Give your coding agent [SETUP.md](SETUP.md)** for the setup plan, installation
-and verification. Every npm, REA and analysis-client command stays in Docker.
-There is no host execution fallback or global MCP registration.
+Every npm, REA and analysis-client command stays in Docker. There is no host
+execution fallback or global MCP registration.
 
 ## At a glance
 
@@ -355,43 +397,10 @@ untrusted text.
 
 A failed run keeps its transcripts as `failed.*.local.log` in the output folder.
 
-## Agent-readable setup and skill
+## Skill installation
 
-Copy this prompt into Codex or Claude Code:
-
-```text
-Set up REA Safe Agent from:
-https://github.com/dagoSte/rea-safe-agents
-
-Read SETUP.md, the bundled SKILL.md, security model and validation record.
-Use this project to analyze untrusted files while containing REA and the
-receiving client, limiting shared data and repeating the verification checks.
-
-Inspect my environment and show the concrete setup plan. Reuse existing
-approvals and matching verified artifacts. Request approval only for work
-that is not already authorized.
-
-Keep REA, npm and the receiving agent inside separate restricted Docker
-containers. Preserve network=none, read-only roots, resource limits and the
-six-tool MCP allowlist. The agent must have zero host mounts and no real key.
-Share only frozen copies of explicitly selected input bytes with REA.
-
-Keep private control files, selected inputs, credentials and outputs out of
-Git and webroots. Preserve existing global client settings. Never attach REA
-to this privileged host conversation or fall back to host execution.
-
-Verify the policy suite, isolation checks and real offline REA analysis.
-Use no paid model API for installation verification. Linux/macOS runtime
-checks have passed; Windows is Experimental, with native policy/profile
-checks passed and full Docker Desktop integration still unverified.
-
-Report actual results, image IDs, successful REA calls, rejected host tools,
-cleanup and remaining gaps. Claim native platform coverage only for the
-host that was actually tested.
-```
-
-The repository is public; the agent can read SETUP.md directly or use a local clone.
-The shared [skill](skills/rea-isolated/SKILL.md) can be copied in full to
+The [Quick start](#quick-start) prompt is the easiest route. The repository is
+public; the agent can read SETUP.md directly or use a local clone. The shared [skill](skills/rea-isolated/SKILL.md) can be copied in full to
 `.agents/skills/rea-isolated/` for Codex or `.claude/skills/rea-isolated/` for
 Claude. Invoke `$rea-isolated` or `/rea-isolated`, respectively. Skill discovery
 provides instructions; the separate container workflow enforces the boundary.

@@ -51,8 +51,11 @@ def file_bytes(root, raw):
                 "Input file changed identity while opening")
         data = handle.read(MAX_FILE_BYTES + 1)
         after = os.fstat(handle.fileno())
-    require(len(data) <= MAX_FILE_BYTES and len(data) == before.st_size == after.st_size
-            and (before.st_mtime_ns, before.st_ctime_ns) == (after.st_mtime_ns, after.st_ctime_ns), "Input changed while reading")
+    # Compare two reads of the open handle. A path stat can return stale
+    # directory-entry times and sizes on Windows; the identity check above
+    # already ties the handle to the inspected path.
+    require(len(data) <= MAX_FILE_BYTES and len(data) == opened.st_size == after.st_size
+            and (opened.st_mtime_ns, opened.st_ctime_ns) == (after.st_mtime_ns, after.st_ctime_ns), "Input changed while reading")
     return data
 
 

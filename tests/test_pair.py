@@ -151,6 +151,18 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaises(tunnel.ProtocolError):
             snapshot.archive(self.root, approved)
 
+    def test_stale_path_metadata_does_not_reject_an_unchanged_file(self):
+        # Windows can report stale directory-entry times and sizes for a path.
+        real = snapshot.regular_stat
+        def stale(path, *, directory=False):
+            value = real(path, directory=directory)
+            if directory:
+                return value
+            return SimpleNamespace(st_dev=value.st_dev, st_ino=value.st_ino, st_mode=value.st_mode, st_nlink=value.st_nlink,
+                                   st_size=value.st_size + 7, st_mtime_ns=0, st_ctime_ns=0)
+        with patch.object(snapshot, "regular_stat", side_effect=stale):
+            self.assertEqual(snapshot.manifest(self.root)[0]["path"], "selected/file.txt")
+
     def test_traversal_and_duplicate_manifest_entries_are_rejected(self):
         for name in ("../key", "/absolute", "a/../key", "a\\key", "a:key", "./file", "a//key", "a\nkey"):
             with self.subTest(name=name), self.assertRaises(tunnel.ProtocolError):
