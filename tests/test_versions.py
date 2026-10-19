@@ -25,14 +25,18 @@ class VersionCheckTests(unittest.TestCase):
         self.assertLess(versions.version_key("0.99.0"), versions.version_key("0.163.0"))
 
     def test_report_lists_updates_failures_and_the_files_to_change(self):
-        pins = {"claude-code": "2.1.302", "codex": "0.163.0", "ghidra": "12.1.4"}
-        latest = {"claude-code": ("2.1.303", ""), "codex": ("0.163.0", ""), "ghidra": (None, "check failed: URLError")}
+        # Read the real pins so this file never mentions them and never needs updating.
+        real = versions.read_pins(ROOT)
+        pins = {name: real[name] for name in ("claude-code", "codex", "ghidra")}
+        newer = real["claude-code"].rsplit(".", 1)[0] + "." + str(int(real["claude-code"].rsplit(".", 1)[1]) + 1)
+        latest = {"claude-code": (newer, ""), "codex": (real["codex"], ""), "ghidra": (None, "check failed: URLError")}
         rows, behind, markdown = versions.report(ROOT, pins, latest)
         self.assertTrue(behind)
         status = {row["component"]: row["status"] for row in rows}
         self.assertEqual(status, {"claude-code": "update available", "codex": "current", "ghidra": "could not check"})
         self.assertIn("`skills/rea-isolated/scripts/agent_session.py`", markdown)
-        _, behind, _ = versions.report(ROOT, {"codex": "0.163.0"}, {"codex": ("0.163.0", "")})
+        self.assertNotIn("tests/test_versions.py", markdown)
+        _, behind, _ = versions.report(ROOT, {"codex": real["codex"]}, {"codex": (real["codex"], "")})
         self.assertFalse(behind)
 
     def test_ghidra_stays_on_the_line_rea_verifies_and_notes_newer_lines(self):
