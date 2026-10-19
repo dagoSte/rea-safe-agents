@@ -63,6 +63,38 @@ class ContainerPolicyTests(unittest.TestCase):
         control.mkdir()
         self.config = {"schema": 1, "docker": str(self.binary.resolve()), "docker_config": str(control.resolve()), "context": "desktop-linux", "image_id": IMAGE, "input_dir": str(self.inputs.resolve())}
 
+    def test_the_large_profile_is_requested_and_then_verified_exactly(self):
+        large = {**self.config, "profile": "large"}
+        boundary.validate_config(large)
+        boundary.validate_config({**self.config, "profile": "standard"})
+        for profile in ("huge", "", None):
+            with self.subTest(profile=profile), self.assertRaises(boundary.BoundaryError):
+                boundary.validate_config({**self.config, "profile": profile})
+        args = boundary.create_args(large, "mcp")
+        for expected in ("--memory=5120m", "--memory-swap=5120m", "--cpus=4", "--pids-limit=256",
+                         "--env=GHIDRA_HEADLESS_MAXMEM=2G", "--env=REA_GHIDRA_STARTUP_TIMEOUT_MS=840000"):
+            self.assertIn(expected, args)
+        self.assertIn("/tmp:rw,nosuid,nodev,noexec,mode=1777,size=2g", args)
+        standard = boundary.create_args(self.config, "mcp")
+        self.assertIn("--memory=2048m", standard)
+        self.assertFalse(any(arg.startswith("--env=") and arg != "--env=HOME=/home/node" for arg in standard))
+        data = approved(large)
+        data["Config"]["Env"] += ["GHIDRA_HEADLESS_MAXMEM=2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS=840000"]
+        data["HostConfig"].update(Memory=5 * 1024**3, MemorySwap=5 * 1024**3, NanoCpus=4 * 10**9, PidsLimit=256,
+                                  Tmpfs=dict(boundary.PROFILES["large"]["tmpfs"]))
+        self.assertEqual(boundary.verify_container(large, data, "mcp", ENV)["profile"], "large")
+        # Neither inspection passes for the other profile: limits and environment are both exact.
+        with self.assertRaises(boundary.BoundaryError):
+            boundary.verify_container(self.config, data, "mcp", ENV)
+        with self.assertRaises(boundary.BoundaryError):
+            boundary.verify_container(large, approved(self.config), "mcp", ENV)
+        for key, value in (("Memory", 6 * 1024**3), ("NanoCpus", 8 * 10**9), ("PidsLimit", 512)):
+            changed = approved(large)
+            changed["Config"]["Env"] = data["Config"]["Env"]
+            changed["HostConfig"] = {**data["HostConfig"], key: value}
+            with self.subTest(key=key), self.assertRaises(boundary.BoundaryError):
+                boundary.verify_container(large, changed, "mcp", ENV)
+
     def test_approved_inspection_is_accepted(self):
         boundary.validate_config(self.config)
         evidence = boundary.verify_container(self.config, approved(self.config), "mcp", ENV)

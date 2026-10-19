@@ -105,11 +105,13 @@ def verify(args):
         pair.boundary.validate_config(deployment)
         pair.boundary.preflight(deployment)
         deployment["image_id"] = pair.boundary.docker_json(deployment, ["image", "inspect", args.rea_image])[0]["Id"]
-        rea_path = control / "rea.json"
-        pair.profile.write_json(rea_path, deployment)
         reports = []
-        for client in ("codex", "claude"):
-            print("Verifying contained " + client + " against real REA", file=sys.stderr, flush=True)
+        # Claude runs against the large REA profile, so Docker's acceptance and
+        # exact inspection of those limits and settings are verified as well.
+        for client, resources in (("codex", "standard"), ("claude", "large")):
+            print("Verifying contained " + client + " against real REA (" + resources + " profile)", file=sys.stderr, flush=True)
+            rea_path = control / ("rea-" + resources + ".json")
+            pair.profile.write_json(rea_path, {**deployment, "profile": resources})
             config_path = control / (client + ".json")
             pair.configure(SimpleNamespace(rea_config=str(rea_path), image=args.agent_image, client=client, output=str(config_path)))
             # Include undeclared host-tool rejection and a real safe REA call.
@@ -125,7 +127,7 @@ def verify(args):
             pair.require(len(policy.results) == len(STEPS) and not any("error" in item or item.get("result", {}).get("isError") for item in policy.results), "REA analysis returned an error")
             pair.require(EXPECTED in json.dumps(policy.results[:3]), "Actual REA inventory did not contain the known child SHA256")
             pair.require(NATIVE_MARKER.decode() in json.dumps(policy.results[4]), "Ghidra did not recover the known native string")
-            reports.append({"client": client, "client_version": result["client_version"], "passed": True,
+            reports.append({"client": client, "rea_profile": rea["profile"], "client_version": result["client_version"], "passed": True,
                             "completed_rea_calls": policy.calls, "child_sha256": EXPECTED, "native_string_recovered": True,
                             "agent_probe": result["agent_probe"], "undeclared_tools_rejected": boundary_report["undeclared_tools_rejected"],
                             "model_requests": result["model_requests"], "real_provider_requests": 0})

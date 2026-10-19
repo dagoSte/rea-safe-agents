@@ -151,9 +151,12 @@ def configure(args):
         handle.write("\n")
     if os.name != "nt":
         output.chmod(0o600)
+    large = large_targets(selected, [item["path"] for item in selected])
+    advice = {"recommendation": "Files above 8 MB need the large REA profile: configure REA again with --profile large, "
+                                "then pair and verify: " + ", ".join(large[:20])} if large and rea.get("profile", "standard") != "large" else {}
     return {"configuration": str(output), "client": args.client, "agent_image_id": image["Id"],
             "selected_files": len(selected), "selected_bytes": sum(item["size"] for item in selected),
-            "status": "requires-paired-verification"}
+            "rea_profile": rea.get("profile", "standard"), **advice, "status": "requires-paired-verification"}
 
 
 def load_config(raw):
@@ -845,11 +848,32 @@ def budgets(targets):
             min(SESSION_TIMEOUT + EXTRA_TIMEOUT * extra, MAX_TIMEOUT))
 
 
+# Put before the analysis prompt when a target is large: the first Ghidra
+# analysis takes minutes, and full listings of a large binary are cut.
+LARGE_GUIDANCE = ("These files are large. The first Ghidra analysis of each one can take several minutes; wait for "
+                  "its result instead of opening the file again. Start with binary_overview, then prefer "
+                  "search_strings, search_procedures and procedure_info with specific patterns over list_strings "
+                  "and list_procedures, whose full results are cut to their first 200 KB.\n\n")
+
+
+def large_targets(inputs, targets):
+    """Targets above the size the standard REA profile can analyze."""
+    sizes = {item["path"]: item["size"] for item in inputs}
+    return [target for target in targets if sizes[target] > boundary.LARGE_INPUT]
+
+
 def run(args):
     path, config, rea = load_config(args.config)
     report = decode_json(receipt_path(path).read_bytes())
     require(report.get("status") == "verified-contained-offline" and report.get("identity") == identity(path, config), "A matching native paired verification is required")
     prompt, targets = build_prompt(args, config)
+    large = large_targets(config["inputs"], targets)
+    if large:
+        # The standard profile runs out of temporary space on these files after
+        # minutes of analysis; refuse before any model request is spent.
+        require(rea.get("profile") == "large", "Files above 8 MB need the large REA profile: " + ", ".join(large)
+                + ". Configure REA again with --profile large, then pair and verify")
+        prompt = LARGE_GUIDANCE + prompt
     requests, turns, timeout = budgets(targets)
     output = private_output(args.output)
     require(not output.exists(), "Use a new private output directory for every fresh contained session")
@@ -867,7 +891,8 @@ def run(args):
         gateway = ModelGateway(config["client"], model=args.model, login=credential, max_requests=requests)
         output.mkdir(mode=0o700, parents=True)
         profile.write_json(output / "started.json", {"identity": identity(path, config), "model": args.model, "targets": targets,
-                                                     "template": args.template, "max_requests": requests, "max_turns": turns, "timeout": timeout})
+                                                     "template": args.template, "rea_profile": rea.get("profile", "standard"),
+                                                     "max_requests": requests, "max_turns": turns, "timeout": timeout})
         # A failed run still leaves its transcripts in the private output directory.
         result, transcripts = exercise(config, rea, prompt=prompt, gateway=gateway, timeout=timeout, login=login, turns=turns,
                                        diagnostics=output / "failed")

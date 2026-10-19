@@ -35,7 +35,8 @@ a compromised host or broker flaws can defeat the boundary.
    only during the reviewed build. Do not add secrets, sockets or privileged
    build entitlements. Both build contexts have explicit allowlists.
 4. Use `scripts/container.py configure` to pin REA's local image ID, context and
-   selection. Its `probe`, `version` and `setup-plan` diagnostics mount only an
+   selection. Add `--profile large` when a selected file is above 8 MB; runs
+   refuse such files on the standard profile. Its `probe`, `version` and `setup-plan` diagnostics mount only an
    empty private temporary directory. Direct `container.py mcp` is retired.
 5. Use `scripts/agent_container.py configure` to select Codex or Claude and pin
    the second image, helpers and input manifest. Review every listed path and

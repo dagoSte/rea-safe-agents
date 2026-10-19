@@ -30,6 +30,18 @@ TMPFS = {
     "/tmp": "rw,nosuid,nodev,noexec,mode=1777,size=256m",
     "/home/node": "rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=0700,size=128m",
 }
+# Resource profiles for the REA container; the agent container always uses the
+# standard limits. Measured peaks: 0.8 GB for a 16 KB executable, 1.3 GB for
+# a 3.8 MB one. A 25 MB library fills the standard /tmp and needs the large
+# profile; its Ghidra startup also needs more than REA's default 330 s.
+PROFILES = {
+    "standard": {"memory": MEMORY, "cpus": CPUS, "pids": PIDS, "tmpfs": TMPFS, "env": {}},
+    "large": {"memory": 5 * 1024**3, "cpus": 4 * 10**9, "pids": 256,
+              "tmpfs": {**TMPFS, "/tmp": "rw,nosuid,nodev,noexec,mode=1777,size=2g"},
+              # Below the clients' 900 s tool timeout, so REA reports its own timeout first.
+              "env": {"GHIDRA_HEADLESS_MAXMEM": "2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS": "840000"}},
+}
+LARGE_INPUT = 8 * 1024 * 1024  # files above this size need the large profile
 MODES = {
     "mcp": ["mcp"],
     "version": ["--version"],
@@ -172,8 +184,15 @@ def input_directory(raw):
     return str(resolved)
 
 
+def profile_of(config):
+    # Configurations written before profiles existed use the standard limits.
+    return PROFILES[config.get("profile", "standard")]
+
+
 def validate_config(config):
-    require(set(config) == {"schema", "docker", "docker_config", "context", "image_id", "input_dir"}, "Unexpected configuration fields")
+    fields = {"schema", "docker", "docker_config", "context", "image_id", "input_dir"}
+    require(set(config) in (fields, fields | {"profile"}), "Unexpected configuration fields")
+    require(config.get("profile", "standard") in PROFILES, "Unknown resource profile")
     require(config["schema"] == 1, "Unsupported configuration schema")
     binary = Path(config["docker"])
     require(binary.is_absolute() and binary.is_file(), "Docker must be a trusted absolute executable path")
@@ -200,13 +219,17 @@ def create_args(config, mode):
         "create", "--rm", "--interactive", "--init", "--pull=never",
         "--read-only", "--network=none", "--cap-drop=ALL",
         "--security-opt=no-new-privileges:true", "--user=" + USER,
-        "--memory=2g", "--memory-swap=2g", "--cpus=2", "--pids-limit=128",
         "--log-driver=none",
         "--workdir=/input", "--env=HOME=/home/node",
         "--label=org.rea-isolated.managed=true",
         "--mount", mount_spec(config["input_dir"]),
     ]
-    for path, options in TMPFS.items():
+    limits = profile_of(config)
+    memory = "--memory={}m".format(limits["memory"] // 1024**2)
+    args += [memory, memory.replace("memory", "memory-swap"), "--cpus={}".format(limits["cpus"] // 10**9),
+             "--pids-limit={}".format(limits["pids"])]
+    args += ["--env={}={}".format(key, value) for key, value in limits["env"].items()]
+    for path, options in limits["tmpfs"].items():
         args.extend(["--tmpfs", path + ":" + options])
     if mode == "probe":
         source = Path(__file__).with_name("probe.js").read_text(encoding="utf-8")
@@ -240,8 +263,9 @@ def verify_container(config, data, mode, image_env):
     require(inner.get("User") == USER, "Unexpected container user")
     require(inner.get("Tty") is False and inner.get("OpenStdin") is True, "MCP requires interactive stdin without a TTY")
     require(inner.get("WorkingDir") == "/input", "Unexpected working directory")
+    limits = profile_of(config)
     expected_env = dict(item.split("=", 1) for item in image_env)
-    expected_env["HOME"] = "/home/node"
+    expected_env.update(HOME="/home/node", **limits["env"])
     actual_env = inner.get("Env") or []
     require(len(actual_env) == len(expected_env) and dict(item.split("=", 1) for item in actual_env) == expected_env, "Unexpected environment injection, such as host proxy credentials")
     require(not inner.get("Volumes"), "Image-declared volumes are forbidden")
@@ -258,9 +282,9 @@ def verify_container(config, data, mode, image_env):
     require(set(host.get("CapDrop") or []) == {"ALL"} and not host.get("CapAdd"), "All Linux capabilities must be dropped")
     options = set(host.get("SecurityOpt") or [])
     require(options in ({"no-new-privileges"}, {"no-new-privileges:true"}), "Unexpected security options")
-    require(host.get("Memory") == MEMORY and host.get("MemorySwap") == MEMORY, "Unexpected memory limits")
-    require(host.get("NanoCpus") == CPUS and host.get("PidsLimit") == PIDS, "Unexpected process/CPU limits")
-    require(host.get("Tmpfs") == TMPFS, "Unexpected temporary filesystems")
+    require(host.get("Memory") == limits["memory"] and host.get("MemorySwap") == limits["memory"], "Unexpected memory limits")
+    require(host.get("NanoCpus") == limits["cpus"] and host.get("PidsLimit") == limits["pids"], "Unexpected process/CPU limits")
+    require(host.get("Tmpfs") == limits["tmpfs"], "Unexpected temporary filesystems")
     require(not host.get("Binds") and not host.get("VolumesFrom"), "Unmanaged mounts are forbidden")
     require(not host.get("Devices") and not host.get("DeviceRequests") and not host.get("DeviceCgroupRules"), "Device access is forbidden")
     require(not host.get("PidMode") and host.get("IpcMode") in ("private", ""), "Host process/IPC namespaces are forbidden")
@@ -274,7 +298,8 @@ def verify_container(config, data, mode, image_env):
     # Only the exact source or the narrow native-Windows drive translation is
     # accepted; unknown WSL, UNC and alternate aliases remain refused.
     require(same_path(mount.get("Source"), config["input_dir"]), "Input mount source does not match the approved path")
-    return {"image_id": data["Image"], "network": "none", "user": USER, "read_only": True, "input_read_only": True}
+    return {"image_id": data["Image"], "network": "none", "user": USER, "read_only": True, "input_read_only": True,
+            "profile": config.get("profile", "standard")}
 
 
 def run_container(config, mode):
@@ -312,7 +337,7 @@ def configure(args):
         "schema": 1, "docker": str(Path(executable).resolve()),
         "docker_config": str(Path(os.environ.get("DOCKER_CONFIG", str(Path.home() / ".docker"))).expanduser().resolve(strict=True)),
         "context": args.context, "image_id": "sha256:" + "0" * 64,
-        "input_dir": input_directory(args.input_dir),
+        "input_dir": input_directory(args.input_dir), "profile": args.profile,
     }
     validate_config(config)
     preflight(config)
@@ -331,7 +356,7 @@ def configure(args):
         handle.write("\n")
     if os.name != "nt":
         output.chmod(0o600)
-    print(json.dumps({"configuration": str(output.resolve()), "image_id": config["image_id"]}))
+    print(json.dumps({"configuration": str(output.resolve()), "image_id": config["image_id"], "profile": args.profile}))
 
 
 def interrupt_cleanup(signum, frame):
@@ -351,6 +376,8 @@ def main():
     setup.add_argument("--input-dir", required=True)
     setup.add_argument("--context", required=True)
     setup.add_argument("--output", required=True)
+    setup.add_argument("--profile", choices=sorted(PROFILES), default="standard",
+                       help="REA resources: large gives 5 GB, 4 CPUs and a 2 GB /tmp for binaries above 8 MB")
     for operation in [*MODES, "probe"]:
         p = sub.add_parser(operation)
         p.add_argument("--config", required=True)

@@ -332,6 +332,11 @@ cp /path/to/suspicious-file ~/.rea-private/selected/
 python3 skills/rea-isolated/scripts/container.py configure --image rea-local:6.7.0-ghidra-12.1.4-locked --context desktop-linux --input-dir ~/.rea-private/selected --output ~/.rea-private/control/rea.json
 ```
 
+For a file above 8 MB, add `--profile large`. REA then gets 5 GB of memory, 4
+CPUs and a 2 GB `/tmp`, so give Docker at least 8 GB. Step 3 tells you when a
+selected file needs it, and a run refuses such a file on the standard profile
+before any model request.
+
 **3. Choose the agent and verify it.** The example configures Claude; for Codex,
 use `--client codex` and `codex.json`. Repeat after any change:
 
@@ -408,6 +413,7 @@ text: the model wrote it from a file you do not trust.
 | ChatGPT asks to enable device code access | Turn it on in chatgpt.com **Settings → Security**, then run `codex-login` again. |
 | `The '…' model is not supported when using Codex with a ChatGPT account` | Pick a model from `codex-models`. |
 | `A matching native paired verification is required` or `Helpers changed` | Something changed since step 3: configure and verify again with a new config file. |
+| `Files above 8 MB need the large REA profile` | Repeat step 2 with `--profile large` and a new `rea.json`, then step 3 with a new config file. |
 | `Another run holds this ChatGPT login` | Wait for the other run; if none is running, delete the `.lock` file the message names. |
 | `Unapproved provider request fields` | The client sent something outside the reviewed profile, so the run stopped by design. Keep the transcript and report it. |
 
@@ -440,6 +446,19 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 ## What's new
 
 Improvements since the first public release, newest first.
+
+### Large binaries
+
+`container.py configure --profile large` gives REA 5 GB of memory, 4 CPUs, 256
+processes and a 2 GB `/tmp`, with a 2 GB Ghidra heap and up to 840 seconds for
+Ghidra's first analysis, just under the clients' 900-second tool timeout. On
+the standard profile a 25 MB library filled the 256 MB `/tmp`, and the
+analysis failed after minutes of work. Pairing now lists selected files above
+8 MB, and a run refuses them on the standard profile before any model request.
+On the large profile the prompt starts with advice for the model: wait for the
+first analysis, begin with `binary_overview`, and search instead of listing,
+since full listings are cut to 200 KB. The runtime check runs Claude against
+the large profile, so Docker's handling of these limits is verified as well.
 
 ### Ready prompts and several files per session
 

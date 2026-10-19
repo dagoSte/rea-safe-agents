@@ -460,7 +460,7 @@ class ReportTests(unittest.TestCase):
                 prompt.write_text("Analyze /input/file")
                 pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
                 outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
-                with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": [{"path": "file"}]}, {})), \
+                with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": [{"path": "file", "size": 4}]}, {})), \
                         patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
                         patch.object(pair, "ModelGateway"), \
                         patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(transcript.encode()), "stderr": bytearray()})):
@@ -522,6 +522,70 @@ class TemplateTests(unittest.TestCase):
         for budget in (0, pair.MAX_REQUESTS_CAP + 1, "32"):
             with self.subTest(budget=budget), self.assertRaises(tunnel.ProtocolError):
                 pair.ModelGateway("codex", fixture_port=1, max_requests=budget)
+
+
+class LargeProfileTests(unittest.TestCase):
+    INPUTS = [{"path": "libbig.so", "size": pair.boundary.LARGE_INPUT + 1}, {"path": "small.bin", "size": pair.boundary.LARGE_INPUT}]
+
+    def run_with(self, rea, target):
+        class Login:
+            def __init__(self, raw):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "codex.json"
+            pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
+            outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
+            with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": self.INPUTS}, rea)), \
+                    patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
+                    patch.object(pair, "ModelGateway") as gateway, \
+                    patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(), "stderr": bytearray()})) as exercise:
+                try:
+                    pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=None, template="triage", target=[target],
+                                             output=str(root / "analysis"), codex_login=str(root / "login.json")))
+                except tunnel.ProtocolError as exc:
+                    gateway.assert_not_called()  # refused before any model request
+                    exercise.assert_not_called()
+                    return str(exc)
+                started = json.loads((root / "analysis/started.json").read_text())
+                return exercise.call_args.kwargs["prompt"], started["rea_profile"]
+
+    def test_large_targets_need_the_large_profile_before_any_request(self):
+        for rea in ({}, {"profile": "standard"}):
+            with self.subTest(rea=rea):
+                refusal = self.run_with(rea, "libbig.so")
+                self.assertIn("libbig.so", refusal)
+                self.assertIn("--profile large", refusal)
+        prompt, profile = self.run_with({"profile": "large"}, "libbig.so")
+        self.assertTrue(prompt.startswith(pair.LARGE_GUIDANCE))
+        self.assertIn("- /input/libbig.so", prompt)
+        self.assertEqual(profile, "large")
+
+    def test_files_up_to_the_threshold_keep_the_standard_profile_and_prompt(self):
+        for rea in ({}, {"profile": "large"}):
+            with self.subTest(rea=rea):
+                prompt, profile = self.run_with(rea, "small.bin")
+                self.assertNotIn(pair.LARGE_GUIDANCE, prompt)
+                self.assertEqual(profile, rea.get("profile", "standard"))
+
+    def test_configure_recommends_the_large_profile_for_large_selections(self):
+        image = {"Id": IMAGE, "Os": "linux", "Config": {"Entrypoint": pair.AGENT_ENTRY, "User": "node"}}
+        for rea, inputs, advised in (({"input_dir": "/selected"}, self.INPUTS, True), ({"input_dir": "/selected", "profile": "large"}, self.INPUTS, False),
+                                     ({"input_dir": "/selected"}, self.INPUTS[1:], False)):
+            with self.subTest(rea=rea, files=len(inputs)), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "rea.json").write_text(json.dumps(rea))
+                with patch.object(pair.boundary, "validate_config"), patch.object(pair.boundary, "preflight"), \
+                        patch.object(pair.boundary, "docker_json", return_value=[image]), \
+                        patch.object(pair.input_snapshot, "manifest", return_value=inputs):
+                    result = pair.configure(SimpleNamespace(rea_config=str(root / "rea.json"), image=IMAGE, client="codex",
+                                                            output=str(root / "pair" / "codex.json")))
+                self.assertEqual(result["rea_profile"], rea.get("profile", "standard"))
+                self.assertEqual("libbig.so" in result.get("recommendation", ""), advised)
 
 
 class MCPPolicyTests(unittest.TestCase):

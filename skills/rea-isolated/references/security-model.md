@@ -97,11 +97,16 @@ packages are linked without running their postinstall hooks. The REA image adds
 Ghidra 12.1.4 and Temurin JDK 21.0.12.1, each verified against a pinned SHA-256.
 On arm64 the decompiler and GNU demangler are compiled from that same verified
 archive, because the release ships x86_64 natives only. Ghidra runs inside the
-REA container under the same limits, with a 1 GiB heap and no network. The
+REA container under the same limits, with a 1 GiB heap (2 GiB on the large
+profile) and no network. The
 arm64 natives are compiled with Debian bookworm's GCC 12 (`g++` and `make`
 pinned), whose point releases follow Debian security updates. Ghidra projects
-live in REA's bounded tmpfs; binaries of a few megabytes have been analyzed,
-larger ones may exhaust the memory or tmpfs budget and stop the session.
+live in REA's bounded tmpfs. The standard profile analyzes binaries of a few
+megabytes; the large profile (5 GiB, 4 CPUs, 256 processes, 2 GiB `/tmp`, a
+2 GiB Ghidra heap and an 840-second first analysis) is required above 8 MB,
+and runs refuse such files on the standard profile. Its limits and settings
+are inspected exactly like the standard ones, and the agent container keeps
+the standard limits.
 
 Lifecycle suppression prevents that install hook path; malicious library/native
 code can still execute later inside the containers. npm integrity establishes

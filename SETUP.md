@@ -69,6 +69,12 @@ python3 skills/rea-isolated/scripts/container.py version --config /absolute/priv
 python3 skills/rea-isolated/scripts/container.py setup-plan --config /absolute/private-control/rea.json
 ```
 
+For a selected file above 8 MB add `--profile large`: REA gets 5 GB of memory,
+4 CPUs, 256 processes and a 2 GB `/tmp`, Ghidra a 2 GB heap and up to 840
+seconds for its first analysis. Docker needs at least 8 GB for both
+containers. Pairing reports files that need it, and a run refuses them on the
+standard profile before any model request.
+
 Every diagnostic mounts a private **empty** temporary input, never the original
 selection. Require the fixed isolation probes to pass, version 6.7.0 and zero
 applied setup actions. No diagnostic configures a host client. The direct
