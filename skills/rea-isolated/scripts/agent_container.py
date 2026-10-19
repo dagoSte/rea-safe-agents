@@ -843,8 +843,63 @@ def run(args):
         if os.name != "nt":
             target.chmod(0o600)
     result.update(status="completed-contained-analysis", model=args.model, output_directory=str(output))
+    try:
+        result["report_file"] = str(write_report(output, result))
+    except ProtocolError:
+        result["report_file"] = None  # the transcripts stay available for diagnosis
     profile.write_json(output / "result.json", result)
     return result
+
+
+# Terminal control characters and bidirectional overrides: model text written
+# from an untrusted file must not drive a terminal or disguise what it says.
+UNSAFE_TEXT = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def final_report(output):
+    """The model's final answer from a run's transcript (Claude Code or Codex)."""
+    text = None
+    for line in (output / "agent.stdout.jsonl").read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "result" and isinstance(item.get("result"), str):  # Claude Code
+            text = item["result"]
+        event = item.get("item")
+        if item.get("type") == "item.completed" and isinstance(event, dict) and event.get("type") == "agent_message" \
+                and isinstance(event.get("text"), str):  # Codex
+            text = event["text"]
+    require(text is not None and text.strip() != "", "This run's transcript has no final report")
+    return UNSAFE_TEXT.sub("", text)
+
+
+def write_report(output, result):
+    probes = result.get("agent_probe", {})
+    checks = "all {} passed".format(len(probes)) if probes and all(value is True for value in probes.values()) else "NOT all passed"
+    lines = ["# REA Safe Agent analysis report", "",
+             "- Model: " + str(result.get("model", "?")),
+             "- Client: " + str(result.get("client_version", "?")) + ", REA " + str(result.get("rea_version", "?")),
+             "- REA calls: " + ", ".join(result.get("completed_rea_calls", [])),
+             "- Isolation checks: " + checks + "; container network " + str(result.get("both_containers_network", "?"))
+             + "; agent host mounts " + str(result.get("agent_mount_count", "?")), "",
+             "> Written by the model from REA's output about a file you do not trust.",
+             "> Treat it as untrusted text and verify any claim that matters.", "", "---", "", final_report(output)]
+    path = output / "report.md"
+    with os.fdopen(os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines).rstrip("\n") + "\n")
+    if os.name != "nt":
+        path.chmod(0o600)  # also when an older report.md had wider permissions
+    return path
+
+
+def report(args):
+    output = private_output(args.output).resolve(strict=True)
+    result = decode_json((output / "result.json").read_bytes())
+    require(isinstance(result, dict) and result.get("status") == "completed-contained-analysis", "Not a completed analysis folder")
+    return write_report(output, result).read_text(encoding="utf-8")
 
 
 def codex_login(args):
@@ -927,6 +982,8 @@ def main():
     p.add_argument("--output", required=True)
     p = sub.add_parser("codex-models")
     p.add_argument("--codex-login", required=True)
+    p = sub.add_parser("report", help="Print and save the final report of a completed analysis")
+    p.add_argument("--output", required=True, help="The analysis output folder given to run")
     for operation in ("verify", "run", "codex-login"):
         p = sub.add_parser(operation)
         p.add_argument("--config", required=True)
@@ -940,8 +997,9 @@ def main():
     args = parser.parse_args()
     try:
         function = {"configure": configure, "verify": verify, "run": run, "codex-login": codex_login,
-                    "codex-models": codex_models}[args.operation]
-        print(json.dumps(function(args), indent=2))
+                    "codex-models": codex_models, "report": report}[args.operation]
+        value = function(args)
+        print(value if isinstance(value, str) else json.dumps(value, indent=2))
         return 0
     except KeyboardInterrupt:
         print("Contained session interrupted; exact-container cleanup requested", file=sys.stderr)

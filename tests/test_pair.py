@@ -399,6 +399,83 @@ class ControlRecordTests(unittest.TestCase):
             self.assertFalse(target.exists())
 
 
+CLAUDE_TRANSCRIPT = "\n".join(json.dumps(item) for item in (
+    {"type": "system", "subtype": "init"},
+    {"type": "result", "result": "draft"},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking aloud"}]}},
+    {"type": "result", "result": "Final \x1b[31mreport\x1b[0m \u202eevil\u202c with **Markdown**"})) + "\nnot json\n"
+CODEX_TRANSCRIPT = "\n".join(json.dumps(item) for item in (
+    {"type": "item.completed", "item": {"type": "agent_message", "text": "I will open it."}},
+    {"type": "item.completed", "item": {"type": "mcp_tool_call", "text": "tool output"}},
+    {"type": "item.completed", "item": {"type": "agent_message", "text": "## Final Codex report"}}))
+COMPLETED = {"status": "completed-contained-analysis", "model": "model-x", "client_version": "client-y", "rea_version": "6.7.0",
+             "completed_rea_calls": ["open_binary", "close_binary"], "agent_probe": {"a": True, "b": True},
+             "both_containers_network": "none", "agent_mount_count": 0}
+
+
+class ReportTests(unittest.TestCase):
+    def test_the_final_answer_is_taken_from_either_client_without_terminal_controls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "agent.stdout.jsonl").write_text(CLAUDE_TRANSCRIPT)
+            text = pair.final_report(output)
+            self.assertTrue(text.startswith("Final ") and text.endswith("with **Markdown**"))
+            self.assertFalse(any(character in text for character in "\x1b\u202e\u202c"))
+            (output / "agent.stdout.jsonl").write_text(CODEX_TRANSCRIPT)
+            self.assertEqual(pair.final_report(output), "## Final Codex report")
+            (output / "agent.stdout.jsonl").write_text(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "  "}}))
+            with self.assertRaises(tunnel.ProtocolError):
+                pair.final_report(output)
+
+    def test_report_saves_a_private_file_with_its_provenance_and_a_warning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "agent.stdout.jsonl").write_text(CODEX_TRANSCRIPT)
+            (output / "result.json").write_text(json.dumps(COMPLETED))
+            text = pair.report(SimpleNamespace(output=str(output)))
+            self.assertIn("- Model: model-x", text)
+            self.assertIn("- REA calls: open_binary, close_binary", text)
+            self.assertIn("all 2 passed", text)
+            self.assertIn("untrusted", text)
+            self.assertTrue(text.rstrip().endswith("## Final Codex report"))
+            self.assertEqual((output / "report.md").read_text(), text)
+            if os.name != "nt":
+                self.assertEqual((output / "report.md").stat().st_mode & 0o777, 0o600)
+            (output / "result.json").write_text(json.dumps(dict(COMPLETED, status="started")))
+            with self.assertRaises(tunnel.ProtocolError):
+                pair.report(SimpleNamespace(output=str(output)))
+
+    def test_run_saves_the_report_and_survives_a_run_without_one(self):
+        class Login:
+            def __init__(self, raw):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+        for transcript, saved in ((CODEX_TRANSCRIPT, True), ('{"type": "turn.failed"}', False)):
+            with self.subTest(saved=saved), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, prompt, output = root / "codex.json", root / "prompt.txt", root / "analysis"
+                prompt.write_text("Analyze /input/file")
+                pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
+                outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
+                with patch.object(pair, "load_config", return_value=(config, {"client": "codex"}, {})), \
+                        patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
+                        patch.object(pair, "ModelGateway"), \
+                        patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(transcript.encode()), "stderr": bytearray()})):
+                    result = pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=str(prompt),
+                                                      output=str(output), codex_login=str(root / "login.json")))
+                self.assertEqual(result["status"], "completed-contained-analysis")
+                if saved:
+                    self.assertEqual(Path(result["report_file"]).resolve(), (output / "report.md").resolve())
+                    self.assertIn("## Final Codex report", (output / "report.md").read_text())
+                else:
+                    self.assertIsNone(result["report_file"])
+                    self.assertFalse((output / "report.md").exists())
+                self.assertEqual(json.loads((output / "result.json").read_text())["report_file"], result["report_file"])
+
+
 class MCPPolicyTests(unittest.TestCase):
     def test_only_successful_actual_rea_results_count_as_completed_calls(self):
         policy = pair.MCPPolicy()

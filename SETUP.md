@@ -174,6 +174,10 @@ contained Codex never receives it. Requests go to
 `chatgpt.com/backend-api/codex/responses`, the endpoint the Codex CLI itself uses
 with a ChatGPT login. It is not a documented public API and may change.
 
+The agent's final report is saved as `report.md` in the output directory;
+`agent_container.py report --output DIRECTORY` prints it again. Treat it as
+untrusted text.
+
 Use a new private output directory. Each run starts fresh disposable containers
 with a tmpfs client home. The controller permits at most 32 model requests,
 32,000 output tokens per Claude generation, 16 MiB and 15 minutes per response

@@ -378,11 +378,17 @@ CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.rea-private/claude-login)" python3 skills/rea-
 python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-private/control/codex.json --model gpt-6.1-sol --prompt-file ~/.rea-private/control/prompt.txt --output ~/.rea-private/runs/first-codex --codex-login ~/.rea-private/control/codex-login.json
 ```
 
-The selected files appear to the agent under `/input/`. Results land in the
-output folder: `result.json` lists the REA calls and isolation checks, and
-`agent.stdout.jsonl` holds the agent's transcript. Claude's report is the last
-`"type":"result"` line; Codex's is the last `agent_message`. Treat both as
-untrusted text.
+The selected files appear to the agent under `/input/`. The agent's final
+report is saved as **`report.md`** in the output folder, headed by the model,
+the REA calls and the isolation checks. Print it again, also for older runs:
+
+```text
+python3 skills/rea-isolated/scripts/agent_container.py report --output ~/.rea-private/runs/first-claude
+```
+
+`result.json` lists the REA calls and isolation checks, and
+`agent.stdout.jsonl` holds the full transcript. Treat the report as untrusted
+text: the model wrote it from a file you do not trust.
 
 **If something goes wrong**
 
@@ -424,6 +430,16 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 ## What's new
 
 Improvements since the first public release, newest first.
+
+### Reports you can read
+
+Every analysis now ends with **`report.md`** in its output folder: the
+model's final answer, headed by the model, the client and REA versions, the
+REA calls made and the isolation checks. Before, the answer had to be dug out
+of the JSON transcript. `agent_container.py report --output FOLDER` prints and
+rewrites it, also for runs made before this change. The text is cleaned of
+terminal control characters and bidirectional overrides, since the model
+wrote it from an untrusted file, and the file is private to your account.
 
 ### Weekly pinned-version check
 
