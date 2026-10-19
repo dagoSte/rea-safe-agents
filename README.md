@@ -4,6 +4,8 @@
   <img src="skills/rea-isolated/assets/rea-safe-agent-logo.png" alt="REA Safe Agent: connected code and analysis modules" width="400">
 </p>
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/dagoSte/rea-safe-agents/badge)](https://scorecard.dev/viewer/?uri=github.com/dagoSte/rea-safe-agents)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15693/badge)](https://www.bestpractices.dev/projects/15693)
 [![Sandbox: two Docker containers](https://img.shields.io/badge/Sandbox-two_Docker_containers-2496ED?logo=docker&logoColor=white)](#how-the-sandbox-works)
 [![Agent tools: restricted](https://img.shields.io/badge/Agent_tools-restricted-2ea44f)](skills/rea-isolated/references/clients.md)
 [![Container network: none](https://img.shields.io/badge/Container_network-none-2ea44f)](skills/rea-isolated/references/security-model.md)
@@ -497,6 +499,18 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 ## What's new
 
 Improvements since the first public release, newest first.
+
+### Public OpenSSF assessments
+
+The official Scorecard and Best Practices badges above link to public results.
+Scorecard runs on pushes to `main` and weekly with a read-only repository token
+and a job-scoped OIDC permission to publish its assessment. Best Practices is
+a documented maintainer self-assessment and is currently **in progress**, not
+Passing. Neither badge certifies the sandbox or replaces a security audit.
+See [the evidence and remaining criteria](docs/openssf.md).
+
+The original project code and documentation now have an explicit MIT license,
+contribution instructions and a private vulnerability-reporting channel.
 
 ### Gateway boundaries and repeatable security checks
 
