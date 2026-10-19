@@ -19,10 +19,10 @@ class VersionCheckTests(unittest.TestCase):
                 self.assertRegex(value, r"^\d+(\.\d+)+(\+\d+)?$")
 
     def test_versions_compare_numerically(self):
-        self.assertLess(versions.version_key("21.0.12.1+1"), versions.version_key("21.0.13+11"))
-        self.assertLess(versions.version_key("12.1"), versions.version_key("12.1.4"))
-        self.assertLess(versions.version_key("2.1.302"), versions.version_key("2.1.303"))
-        self.assertLess(versions.version_key("0.99.0"), versions.version_key("0.163.0"))
+        self.assertLess(versions.version_key("9.0.7.1+1"), versions.version_key("9.0.8+11"))
+        self.assertLess(versions.version_key("7.3"), versions.version_key("7.3.2"))
+        self.assertLess(versions.version_key("3.4.98"), versions.version_key("3.4.99"))
+        self.assertLess(versions.version_key("0.99.0"), versions.version_key("0.150.0"))
 
     def test_report_lists_updates_failures_and_the_files_to_change(self):
         # Read the real pins so this file never mentions them and never needs updating.
@@ -41,17 +41,17 @@ class VersionCheckTests(unittest.TestCase):
 
     def test_ghidra_stays_on_the_line_rea_verifies_and_notes_newer_lines(self):
         pins = dict.fromkeys(("rea-agents", "claude-code", "codex", "temurin-jdk-21", "node"), "1.0.0")
-        pins["ghidra"] = "12.1.4"
-        with patch.object(versions, "ghidra_releases", return_value=["12.2", "12.1.5", "12.1.4", "12.0.4"]), \
+        pins["ghidra"] = "7.3.2"
+        with patch.object(versions, "ghidra_releases", return_value=["7.4", "7.3.5", "7.3.2", "7.2.9"]), \
                 patch.object(versions, "npm_latest", side_effect=OSError("offline")), \
-                patch.object(versions, "temurin_21_latest", return_value="21.0.13+11"), \
+                patch.object(versions, "temurin_21_latest", return_value="9.0.8+11"), \
                 patch.object(versions, "node_latest", return_value="1.0.0"):
             latest = versions.latest_versions(pins)
-        self.assertEqual(latest["ghidra"][0], "12.1.5")
-        self.assertIn("12.2", latest["ghidra"][1])
+        self.assertEqual(latest["ghidra"][0], "7.3.5")
+        self.assertIn("7.4", latest["ghidra"][1])
         # One unavailable source is reported without hiding the others.
         self.assertEqual(latest["codex"], (None, "check failed: OSError"))
-        self.assertEqual(latest["temurin-jdk-21"], ("21.0.13+11", ""))
+        self.assertEqual(latest["temurin-jdk-21"], ("9.0.8+11", ""))
 
 
 if __name__ == "__main__":
