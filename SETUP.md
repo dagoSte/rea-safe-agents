@@ -183,7 +183,7 @@ with a ChatGPT login. It is not a documented public API and may change.
 
 Instead of `--prompt-file`, `--template triage` (or `executable`, `javascript`,
 `archive`, `android`) uses a ready prompt over every selected file; `--target NAME`
-limits it to some of them.
+limits both the frozen snapshot and the broker's file targets to some of them.
 
 The agent's final answer is saved as `report.md` in the output directory,
 with a header saying whether the client ended with it. If the transcript has no
@@ -193,10 +193,17 @@ analysis with `report_file: null` and the reason in `report_error`;
 Treat it as untrusted text, and view it as plain text or with raw HTML
 rendering turned off.
 
+For Codex, a provider-final label also requires the exported visible text to
+match the provider's recorded answer hash. Older runs without that hash are
+labelled unverified.
+
 Use a new private output directory. Each run starts fresh disposable containers
-with a tmpfs client home. The controller permits at most 32 model requests,
-32,000 output tokens per Claude generation, 16 MiB and 15 minutes per response
-and 30 minutes per analysis; your plan's usage limits also apply. A failed run
+with a tmpfs client home. One target gets 32 model requests, 20 Claude turns
+and 30 minutes. Each extra target adds 24 requests, 15 turns and 15 minutes,
+up to 128 requests, 80 turns and 90 minutes. Each large native target adds
+another 30 minutes, with an absolute session cap of four hours. The response
+limits remain 32,000 output tokens per Claude generation, 16 MiB and
+15 minutes per model response; your plan's usage limits also apply. A failed run
 keeps its transcripts in the output directory as `failed.*.local.log`. Both live
 subscription paths completed a real analysis on macOS ARM64 on 2026-10-19; see
 the [validation record](docs/validation.md). Linux has not been re-run for this version.

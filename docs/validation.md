@@ -2,6 +2,30 @@
 
 Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT subscriptions on macOS ARM64.
 
+## 2026-10-19 increment: independent-review fixes
+
+Applied above Android commit `a8d5f41`. Exact native release, architecture and
+tarball checks now include orphaned lock entries; Python pin extraction is
+scoped to module constants and the required REA equality. The controller
+parses complete SSE events, handles malformed/deep JSON, and associates a
+Codex provider-final label with the exported visible text's SHA-256. Effective
+targets constrain both the snapshot and file tool calls; large-file guidance
+is checked against the final prompt limit before login or container startup.
+
+| Check | Result |
+| --- | --- |
+| Full policy suite, native macOS ARM64 | 143 tests on each of Python 3.11.5, 3.12.8, 3.13.2 and 3.14.7: 142 passed, 1 Windows-only profile lookup skipped |
+| Version-check regressions | 21 tests passed; new counterexamples failed before their fixes |
+| Report and resource boundaries | Non-author re-read and targeted probes passed, including multiline SSE, CR/LF/CRLF split across chunks, deep JSON on Python 3.11, persisted answer hashes, target filtering and oversized augmented prompts |
+| Runtime verifier | Updated to retain scoped broker guards and check the provider answer hash against the real client's transcript; this revised runtime check has not yet been run |
+
+The preceding Android baseline passed all four jobs in
+[CI run 39256339684](https://github.com/dagoSte/rea-safe-agents/actions/runs/39256339684),
+including Windows policy/profile checks and Linux runtime analysis with JADX
+and both clients. That run predates these review fixes and does not establish
+their Linux, Windows or Docker runtime coverage. No paid model call was made
+for the review fixes.
+
 ## 2026-10-19 increment: Android apps
 
 JADX through jadx-headless-mcp 0.7.1 (SHA-256 `6e5eacf5…`, the JAR REA 6.7.0

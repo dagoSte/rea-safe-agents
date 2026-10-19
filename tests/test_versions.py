@@ -125,6 +125,84 @@ class PinTests(unittest.TestCase):
                 (root / path).write_text(changed)
                 self.assertNotEqual(versions.consistency(root, pins), [])
 
+    def test_native_builds_require_the_exact_release_platform_and_tarball(self):
+        pins = versions.read_pins(ROOT)
+        lockfile = versions.ASSETS / "agent/package-lock.json"
+        claude, codex = pins["claude-code"], pins["codex"]
+        def change_native(data, package, platform, replacement):
+            entry = data["packages"][f"node_modules/{package}-{platform}"]
+            entry["resolved"] = entry["resolved"].replace(entry["version"] + ".tgz", replacement + ".tgz")
+            entry["version"] = replacement
+        def wrong_codex_alias(data):
+            change_native(data, "@openai/codex", "linux-x64", codex + "-linux-arm64")
+            data["packages"]["node_modules/@openai/codex"]["optionalDependencies"]["@openai/codex-linux-x64"] = "npm:@openai/codex@" + codex + "-linux-arm64"
+        def wrong_claude_tarball(data):
+            data["packages"]["node_modules/@anthropic-ai/claude-code-linux-x64"]["resolved"] = (
+                "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/-/claude-code-darwin-arm64-" + claude + ".tgz")
+        def remove_codex_alias(data, stale=False):
+            del data["packages"]["node_modules/@openai/codex"]["optionalDependencies"]["@openai/codex-linux-x64"]
+            if stale:
+                change_native(data, "@openai/codex", "linux-x64", "0.0.1-linux-x64")
+        cases = {
+            "Claude prerelease": lambda data: change_native(data, "@anthropic-ai/claude-code", "linux-x64", claude + "-rc.1"),
+            "Codex wrong platform": lambda data: change_native(data, "@openai/codex", "linux-x64", codex + "-linux-arm64"),
+            "Codex wrong platform alias and entry": wrong_codex_alias,
+            "Claude wrong platform tarball": wrong_claude_tarball,
+            "stale native omitted from optional dependencies": lambda data: remove_codex_alias(data, stale=True),
+            "current native missing its parent alias": remove_codex_alias,
+        }
+        for label, change in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                copy_pinned_tree(root)
+                path = root / lockfile
+                data = json.loads(path.read_text())
+                change(data)
+                path.write_text(json.dumps(data))
+                problems = versions.consistency(root, pins)
+                self.assertTrue(any(str(lockfile) in problem for problem in problems))
+
+    def test_reviewed_constants_cannot_be_masked_by_an_unrelated_local(self):
+        pins = versions.read_pins(ROOT)
+        codex = pins["codex"]
+        reviewed = {"codex": "codex-cli " + codex, "claude": pins["claude-code"] + " (Claude Code)"}
+        cases = {
+            "CODEX_VERSION": (versions.SCRIPTS / "agent_container.py", lambda text: text.replace(
+                f'CODEX_VERSION = "{codex}"', 'CODEX_VERSION = "0.0.1"') + f'\ndef unused_review_fixture():\n    CODEX_VERSION = "{codex}"\n'),
+            "REVIEWED": (versions.SCRIPTS / "agent_session.py", lambda text: text.replace(
+                '"codex-cli ' + codex + '"', '"codex-cli 0.0.1"') + f'\ndef unused_review_fixture():\n    REVIEWED = {reviewed!r}\n'),
+        }
+        for name, (relative, change) in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                copy_pinned_tree(root)
+                path = root / relative
+                path.write_text(change(path.read_text()))
+                problems = versions.consistency(root, pins)
+                self.assertTrue(any(name in problem for problem in problems))
+
+    def test_rea_version_must_be_required_by_equality_in_exercise(self):
+        pins = versions.read_pins(ROOT)
+        comparison = f'policy.server_version == "{pins["rea-agents"]}"'
+        cases = {
+            "inequality": lambda text: text.replace(comparison, comparison.replace(" == ", " != ")),
+            "minimum version": lambda text: text.replace(comparison, comparison.replace(" == ", " >= ")),
+            "another object": lambda text: text.replace(comparison, comparison.replace("policy.", "other_policy.")),
+            "unused comparison": lambda text: text.replace(comparison, "True") + f'\ndef unused_review_fixture():\n    {comparison}\n',
+            "unused requirement": lambda text: text.replace(comparison, "True") + f'\ndef unused_review_fixture():\n    require({comparison}, "unused")\n',
+        }
+        for label, change in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                copy_pinned_tree(root)
+                path = root / versions.SCRIPTS / "agent_container.py"
+                text = path.read_text()
+                changed = change(text)
+                self.assertNotEqual(changed, text)
+                path.write_text(changed)
+                problems = versions.consistency(root, pins)
+                self.assertTrue(any("does not require REA" in problem for problem in problems))
+
 
 class ComparisonTests(unittest.TestCase):
     def test_versions_compare_per_component(self):

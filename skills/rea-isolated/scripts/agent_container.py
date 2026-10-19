@@ -337,7 +337,9 @@ def bound_error(item):
 
 
 class MCPPolicy:
-    def __init__(self):
+    def __init__(self, inputs=None, *, rea_profile="standard"):
+        self.targets = None if inputs is None else {"/input/" + item["path"]: item["size"] for item in inputs}
+        self.rea_profile = rea_profile
         self.pending = {}
         self.discovered = set()
         self.server_version = None
@@ -377,6 +379,12 @@ class MCPPolicy:
                 path = args.get(key)
                 require(isinstance(path, str) and path.startswith("/input/") and ".." not in path.split("/")
                         and "\\" not in path and not any(c in path for c in "\x00\r\n"), "Targets must use the frozen /input snapshot")
+                if self.targets is not None:
+                    directory = name == "analyze_javascript_application" and any(target.startswith(path.rstrip("/") + "/") for target in self.targets)
+                    require(path in self.targets or directory, "Tool target is outside this run's effective targets")
+                    if name == "open_binary":
+                        require(self.targets[path] <= boundary.LARGE_INPUT or self.rea_profile == "large",
+                                "Native files above 8 MB need the large REA profile")
         if "id" in item:
             identifier = item["id"]
             require(type(identifier) in (str, int) and len(str(identifier)) <= 128
@@ -570,6 +578,9 @@ class ModelGateway:
         self.catalogs = []
         # Codex's transcript drops the provider's phase; the stream keeps it.
         self.final_phase = None
+        self.final_text_sha256 = None
+        self._phase_data = []
+        self._phase_first_line = True
         self.session = str(uuid.uuid4())
         if client == "claude":
             # Claude passes its own subscription login through; the gateway only
@@ -660,35 +671,58 @@ class ModelGateway:
                            "headers": dict(sorted(limits.items())[:32])})
                 total, pending = 0, b""
                 watch = self.client == "codex" and content_type == "text/event-stream" and response.status == 200
+                self._phase_data = []
+                self._phase_first_line = True
                 while chunk := response.read1(16384):
                     require(time.monotonic() < deadline, "Model response exceeded time limit")
                     total += len(chunk)
                     require(total <= MAX_RESPONSE, "Model response exceeds byte limit")
                     if watch:
-                        *lines, pending = (pending + chunk).split(b"\n")
+                        data = pending + chunk
+                        # Hold a trailing CR until the next chunk, since it may
+                        # be the first half of CRLF. SSE also admits bare CR.
+                        trailing_cr = data.endswith(b"\r")
+                        *lines, pending = re.split(b"\r\n|\r|\n", data[:-1] if trailing_cr else data)
+                        if trailing_cr:
+                            pending += b"\r"
                         self.note_phase(lines)
                     wire.send({"type": "model-data", "id": frame["id"], "body": pack(chunk)})
-                if watch:
-                    self.note_phase([pending])
+                if watch and pending.endswith(b"\r"):
+                    self.note_phase([pending[:-1]])
+                self._phase_data = []  # an event without a blank terminator is incomplete
                 wire.send({"type": "model-end", "id": frame["id"]})
                 return
             finally:
                 connection.close()
 
     def note_phase(self, lines):
-        """Record the phase the provider gave each completed assistant message, the last one winning."""
+        """Observe complete SSE events; retain the last assistant's phase and visible-text hash."""
         for line in lines:
-            if not line.startswith(b"data:"):
+            if self._phase_first_line:
+                line = line.removeprefix(b"\xef\xbb\xbf")
+                self._phase_first_line = False
+            if line:
+                field, _, value = line.partition(b":")
+                if field == b"data":
+                    self._phase_data.append(value.removeprefix(b" "))
                 continue
+            data, self._phase_data = b"\n".join(self._phase_data), []
             try:
-                event = json.loads(line[5:])
-            except ValueError:
+                event = json.loads(data.decode("utf-8"))
+            except (ValueError, RecursionError):
                 continue
-            item = event.get("item") if isinstance(event, dict) else None
+            if not isinstance(event, dict):
+                continue
+            item = event.get("item")
             if event.get("type") == "response.output_item.done" and isinstance(item, dict) \
                     and item.get("type") == "message" and item.get("role") == "assistant":
                 phase = item.get("phase")
                 self.final_phase = phase if isinstance(phase, str) and re.fullmatch(r"[a-z_]{1,32}", phase) else None
+                content = item.get("content")
+                self.final_text_sha256 = None
+                if isinstance(content, list) and all(isinstance(part, dict) and part.get("type") == "output_text"
+                                                    and isinstance(part.get("text"), str) for part in content):
+                    self.final_text_sha256 = answer_sha256("".join(part["text"] for part in content))
 
 
 @contextlib.contextmanager
@@ -707,14 +741,17 @@ def fixture(client, *, steps=None, test_refusals=True):
         thread.join(timeout=2)
 
 
-def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, tool_timeout=profile.TOOL_TIMEOUT, diagnostics=None):
+def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, tool_timeout=profile.TOOL_TIMEOUT, diagnostics=None, targets=None):
+    selected = {item["path"] for item in config["inputs"]} if targets is None else set(targets)
+    require(bool(selected) and selected <= {item["path"] for item in config["inputs"]}, "Invalid effective targets")
+    inputs = [item for item in config["inputs"] if item["path"] in selected]
     boundary.preflight(rea)
-    temporary, snapshot = input_snapshot.stage(rea["input_dir"], config["inputs"])
+    temporary, snapshot = input_snapshot.stage(rea["input_dir"], inputs)
     managed = Containers(rea)
     incoming = queue.Queue(maxsize=16)
     transcripts = {"stdout": bytearray(), "stderr": bytearray()}
     container_errors = bytearray()
-    policy, done = MCPPolicy(), None
+    policy, done = MCPPolicy(inputs, rea_profile=rea.get("profile", "standard")), None
     def queue_item(actor, item):
         incoming.put((actor, item), timeout=5)
     def read_agent(process):
@@ -883,7 +920,7 @@ def budgets(targets, large=()):
 LARGE_GUIDANCE = ("These files are large. The first Ghidra analysis of each one can take a quarter of an hour or more; "
                   "wait for its result instead of opening the file again. Start with binary_overview, then prefer "
                   "search_strings, search_procedures and procedure_info with specific patterns over list_strings "
-                  "and list_procedures, whose full results are cut to their first 200 KB.\n\n")
+                  "and list_procedures, whose full results are cut in the middle to 200 KB.\n\n")
 
 
 def large_targets(inputs, targets):
@@ -908,6 +945,7 @@ def run(args):
         require(rea.get("profile") == "large", "Files above 8 MB need the large REA profile: " + ", ".join(large)
                 + ". Configure REA again with --profile large, then pair and verify")
         prompt = LARGE_GUIDANCE + prompt
+    require(bool(prompt.strip()) and len(prompt.encode()) <= 128 * 1024, "Provide a bounded analysis prompt including large-file guidance")
     requests, turns, timeout = budgets(targets, large)
     tool_timeout = boundary.profile_of(rea)["tool_timeout"]
     output = private_output(args.output)
@@ -931,7 +969,7 @@ def run(args):
                                                      "tool_timeout": tool_timeout})
         # A failed run still leaves its transcripts in the private output directory.
         result, transcripts = exercise(config, rea, prompt=prompt, gateway=gateway, timeout=timeout, login=login, turns=turns,
-                                       tool_timeout=tool_timeout, diagnostics=output / "failed")
+                                       tool_timeout=tool_timeout, diagnostics=output / "failed", targets=targets)
     for channel, data in transcripts.items():
         target = output / ("agent." + channel + ".jsonl")
         target.write_bytes(data)
@@ -941,6 +979,7 @@ def run(args):
                   template=args.template, report_file=None)
     if config["client"] == "codex":
         result["codex_final_phase"] = gateway.final_phase
+        result["codex_final_text_sha256"] = gateway.final_text_sha256
     # The completed analysis is recorded first, so a failed report cannot lose
     # it; `report --output` can write the report again later.
     replace_private(output / "result.json", json.dumps(result, indent=2) + "\n")
@@ -964,6 +1003,11 @@ HIDDEN = re.compile("[\u061c\u115f\u1160\u180e\u200b\u200e\u200f\u202a-\u202e\u2
 
 def readable(text):
     return HIDDEN.sub(lambda match: "[U+{:04X}]".format(ord(match.group())), CONTROL.sub("", text))
+
+
+def answer_sha256(text):
+    """Bind provider provenance to the same visible text that the report exports."""
+    return hashlib.sha256(readable(text).encode("utf-8")).hexdigest()
 
 
 def final_answer(lines):
@@ -1003,7 +1047,7 @@ def shown(value, pattern):
     return value if isinstance(value, str) and re.fullmatch(pattern, value) else "(invalid)"
 
 
-def closing(ending, result):
+def closing(ending, result, text):
     if ending == "claude-success":
         return "Claude Code's successful closing result"
     if ending == "claude-error":
@@ -1011,7 +1055,10 @@ def closing(ending, result):
     if "codex_final_phase" not in result:
         return "not recorded for this run"
     if result["codex_final_phase"] == "final_answer":
-        return "marked final by the provider"
+        expected = result.get("codex_final_text_sha256")
+        if isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{64}", expected) and hmac.compare_digest(expected, answer_sha256(text)):
+            return "marked final by the provider"
+        return "NOT verified against the provider's final answer"
     return "NOT marked final by the provider; it may be an intermediate message"
 
 
@@ -1027,7 +1074,7 @@ def write_report(output, result):
              "- Model: " + shown(result.get("model"), MODEL_ID.pattern),
              "- Client: " + shown(result.get("client_version"), r"[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,63}")
              + ", REA " + shown(result.get("rea_version"), r"[0-9A-Za-z][0-9A-Za-z.+-]{0,31}"),
-             "- Final answer: " + closing(ending, result),
+             "- Final answer: " + closing(ending, result, text),
              "- REA calls: " + calls,
              "- Isolation checks: " + checks + "; container network " + shown(result.get("both_containers_network"), r"[a-z]{1,16}")
              + "; agent host mounts " + (str(mounts) if type(mounts) is int else "(invalid)"), "",

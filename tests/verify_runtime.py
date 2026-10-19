@@ -169,8 +169,8 @@ def android_fixture(path):
 
 
 class RecordingPolicy(pair.MCPPolicy):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, inputs, *, rea_profile):
+        super().__init__(inputs, rea_profile=rea_profile)
         self.results = []
         self.calls = []
 
@@ -221,7 +221,7 @@ def verify(args):
             # Include undeclared host-tool rejection and a real safe REA call.
             boundary_report = pair.verify(SimpleNamespace(config=str(config_path)))
             _, config, rea = pair.load_config(config_path)
-            policy = RecordingPolicy()
+            policy = RecordingPolicy(config["inputs"], rea_profile=resources)
             login = pair.profile.OFFLINE_CLAUDE_LOGIN if client == "claude" else None
             with pair.fixture(client, steps=STEPS, test_refusals=False) as server, patch.object(pair, "MCPPolicy", return_value=policy):
                 gateway = pair.ModelGateway(client, fixture_port=server.server_port, login=login)
@@ -242,7 +242,8 @@ def verify(args):
             answer = pair.final_answer(bytes(transcripts["stdout"]).split(b"\n"))
             pair.require(answer == (FINAL_TEXT, "codex" if client == "codex" else "claude-success"),
                          "The report did not find the client's final answer")
-            pair.require(client == "claude" or gateway.final_phase == "final_answer", "The provider's final-answer phase was not recorded")
+            pair.require(client == "claude" or (gateway.final_phase == "final_answer" and gateway.final_text_sha256 == pair.answer_sha256(answer[0])),
+                         "The provider's final answer was not associated with the exported text")
             reports.append({"client": client, "rea_profile": rea["profile"], "client_version": result["client_version"], "passed": True,
                             "completed_rea_calls": policy.calls, "child_sha256": EXPECTED, "native_string_recovered": True,
                             "android_package_and_method_recovered": True,

@@ -400,8 +400,12 @@ python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-priva
 ```
 
 A template covers every selected file, one at a time; add `--target NAME`
-(repeatable) to choose some of them. More files get more model requests,
-Claude turns and time, up to fixed caps (128 requests, 80 turns, 90 minutes).
+(repeatable) to choose some of them. Only those effective targets are copied
+into the run's snapshot, and the MCP broker refuses other file targets.
+A single target gets 32 model requests, 20 Claude turns and 30 minutes;
+each extra target adds 24 requests, 15 turns and 15 minutes, capped at
+128 requests, 80 turns and 90 minutes. Each large native target adds another
+30 minutes, with an absolute session cap of four hours.
 
 The selected files appear to the agent under `/input/`. The agent's final
 answer is saved as **`report.md`** in the output folder, headed by the model,
@@ -414,6 +418,10 @@ older runs:
 ```text
 python3 skills/rea-isolated/scripts/agent_container.py report --output ~/.rea-private/runs/first-claude
 ```
+
+A Codex answer is labelled provider-final only when its visible text matches
+the hash recorded from the provider's completed assistant message. Older runs
+without that hash, or a mismatched answer, are labelled unverified.
 
 `result.json` lists the REA calls and isolation checks, and
 `agent.stdout.jsonl` holds the full transcript. Treat the report as untrusted
@@ -513,7 +521,8 @@ A completed analysis now leaves **`report.md`** in its output folder: the
 model's final answer, headed by the model, the client and REA versions, the
 REA calls made, the isolation checks and whether the client ended with that
 answer (Claude Code's closing result, or a Codex message the provider marked
-final). Before, the answer had to be dug out of the JSON transcript.
+final whose visible-text hash matches the exported answer). Before, the answer
+had to be dug out of the JSON transcript.
 `agent_container.py report --output FOLDER` prints and rewrites it, also for
 runs made before this change. `result.json` is saved first, so a report that
 cannot be written never loses the analysis: it records `report_error` instead.

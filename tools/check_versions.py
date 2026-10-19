@@ -102,17 +102,36 @@ def read_pins(root):
 
 
 def python_values(path):
-    """Constants assigned in a Python file and string comparisons with server_version, read from its syntax tree."""
+    """Module constants and the REA equality required by exercise(), read from Python syntax."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     assigned, compared = {}, []
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             try:
                 assigned[node.targets[0].id] = ast.literal_eval(node.value)
             except ValueError:
+                assigned[node.targets[0].id] = None
+    def required_versions(condition):
+        if isinstance(condition, ast.BoolOp) and isinstance(condition.op, ast.And):
+            return [value for item in condition.values for value in required_versions(item)]
+        if (isinstance(condition, ast.Compare) and len(condition.ops) == 1 and isinstance(condition.ops[0], ast.Eq)
+                and isinstance(condition.left, ast.Attribute) and condition.left.attr == "server_version"
+                and isinstance(condition.left.value, ast.Name) and condition.left.value.id == "policy"
+                and isinstance(condition.comparators[0], ast.Constant) and isinstance(condition.comparators[0].value, str)):
+            return [condition.comparators[0].value]
+        return []
+    for function in tree.body:
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) or function.name != "exercise":
+            continue
+        pending = list(function.body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
                 continue
-        elif isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute) and node.left.attr == "server_version":
-            compared += [item.value for item in node.comparators if isinstance(item, ast.Constant)]
+            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name) and node.value.func.id == "require" and node.value.args):
+                compared += required_versions(node.value.args[0])
+            pending.extend(ast.iter_child_nodes(node))
     return assigned, compared
 
 
@@ -125,16 +144,22 @@ def consistency(root, pins):
         if packages.get("", {}).get("dependencies", {}).get(package) != version or main.get("version") != version:
             problems.append(f"{path} does not lock {package} {version}")
         # The package's own native builds hold the binaries the image runs: each must be the same release.
-        natives = [name for name in main.get("optionalDependencies") or {} if name.startswith(package + "-")]
+        optional = main.get("optionalDependencies") or {}
+        locked = {name[len("node_modules/"):] for name in packages if name.startswith("node_modules/" + package + "-")}
+        natives = sorted(name for name in optional.keys() | locked if name.startswith(package + "-"))
         for name in [package, *natives]:
-            spec = (main.get("optionalDependencies") or {}).get(name, version)
+            spec = version if name == package else optional.get(name)
             entry = packages.get("node_modules/" + name, {})
             entry_version = entry.get("version", "")
-            if spec != version and not spec.startswith("npm:" + package + "@" + version + "-"):
-                problems.append(f"{path} pins {name} to {spec}, not {package} {version}")
-            if (entry_version != version and not entry_version.startswith(version + "-")
-                    or not entry.get("resolved", "").endswith("-" + entry_version + ".tgz")):
-                problems.append(f"{path} locks {name} at {entry_version or 'nothing'} instead of {package} {version}")
+            aliased = package == "@openai/codex" and name != package
+            expected_version = version + name[len(package):] if aliased else version
+            expected_spec = "npm:" + package + "@" + expected_version if aliased else version
+            artifact = package if aliased else name
+            expected_tarball = f"https://registry.npmjs.org/{artifact}/-/{artifact.rsplit('/', 1)[-1]}-{expected_version}.tgz"
+            if spec != expected_spec:
+                problems.append(f"{path} pins {name} to {spec}, not {expected_spec}")
+            if entry_version != expected_version or entry.get("resolved") != expected_tarball:
+                problems.append(f"{path} does not lock {name} {expected_version} from {expected_tarball}")
     lock(ASSETS / "package-lock.json", "rea-agents", pins["rea-agents"])
     lock(ASSETS / "agent/package-lock.json", "@anthropic-ai/claude-code", pins["claude-code"])
     lock(ASSETS / "agent/package-lock.json", "@openai/codex", pins["codex"])

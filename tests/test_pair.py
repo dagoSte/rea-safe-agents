@@ -1,6 +1,7 @@
 """Security invariants for file snapshots, the agent container and the broker."""
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -413,7 +414,8 @@ CODEX_TRANSCRIPT = "\n".join(json.dumps(item) for item in (
     {"type": "item.completed", "item": {"type": "agent_message", "text": "## Final Codex report"}}))
 COMPLETED = {"status": "completed-contained-analysis", "model": "model-x", "client_version": "codex-cli 0.163.0", "rea_version": "6.7.0",
              "completed_rea_calls": ["open_binary", "close_binary"], "agent_probe": {"a": True, "b": True},
-             "both_containers_network": "none", "agent_mount_count": 0, "codex_final_phase": "final_answer"}
+             "both_containers_network": "none", "agent_mount_count": 0, "codex_final_phase": "final_answer",
+             "codex_final_text_sha256": hashlib.sha256(b"## Final Codex report").hexdigest()}
 
 
 def codex_transcript(final):
@@ -426,6 +428,18 @@ def codex_transcript(final):
 
 
 class ReportTests(unittest.TestCase):
+    def test_a_final_phase_must_match_the_exported_answer(self):
+        for expected in (None, "invalid", hashlib.sha256(b"a different answer").hexdigest()):
+            with self.subTest(expected=expected):
+                result = dict(COMPLETED)
+                if expected is not None:
+                    result["codex_final_text_sha256"] = expected
+                else:
+                    result.pop("codex_final_text_sha256", None)
+                text = pair.report(SimpleNamespace(output=str(self.folder(CODEX_TRANSCRIPT, result))))
+                self.assertNotIn("- Final answer: marked final by the provider\n", text)
+                self.assertIn("NOT verified", text)
+
     def folder(self, transcript, result=COMPLETED):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -561,10 +575,10 @@ class ReportTests(unittest.TestCase):
         self._last_outputs = [output]
         prompt.write_text("Analyze /input/file")
         pair.receipt_path(config).write_text(json.dumps({"status": "verified-contained-offline", "identity": {"id": 1}}))
-        outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model", "codex_final_phase")}
+        outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model", "codex_final_phase", "codex_final_text_sha256")}
         with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": [{"path": "file", "size": 4}]}, {})), \
                 patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
-                patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=phase)), \
+                patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=phase, final_text_sha256=COMPLETED["codex_final_text_sha256"])), \
                 patch.object(pair.os, "replace", side_effect=replace), \
                 patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(transcript.encode()), "stderr": bytearray()})):
             result = pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=str(prompt),
@@ -576,9 +590,17 @@ class ReportTests(unittest.TestCase):
         result, output = self.run_codex(CODEX_TRANSCRIPT, phase="commentary")
         self.assertEqual(result["status"], "completed-contained-analysis")
         self.assertEqual(result["codex_final_phase"], "commentary")
+        self.assertEqual(result["codex_final_text_sha256"], COMPLETED["codex_final_text_sha256"])
         self.assertEqual(Path(result["report_file"]).resolve(), (output / "report.md").resolve())
         self.assertIn("- Final answer: NOT marked final by the provider", (output / "report.md").read_text())
         self.assertNotIn("report_error", result)
+
+    def test_the_provider_hash_is_saved_and_checked_when_the_report_is_regenerated(self):
+        result, output = self.run_codex(CODEX_TRANSCRIPT)
+        self.assertEqual(result["codex_final_text_sha256"], COMPLETED["codex_final_text_sha256"])
+        self.assertIn("- Final answer: marked final by the provider\n", pair.report(SimpleNamespace(output=str(output))))
+        (output / "agent.stdout.jsonl").write_text(codex_transcript("a different answer"))
+        self.assertIn("- Final answer: NOT verified", pair.report(SimpleNamespace(output=str(output))))
 
     def test_a_failed_report_never_loses_the_completed_analysis(self):
         for transcript, failure, error in (('{"type": "turn.failed"}', None, "ProtocolError"),
@@ -616,6 +638,41 @@ class SSEResponse(Response):
 
 
 class FinalPhaseTests(unittest.TestCase):
+    def test_multiline_sse_events_replace_the_previous_phase_and_bind_the_text(self):
+        def event(text, phase):
+            return {"type": "response.output_item.done", "item": {"type": "message", "role": "assistant", "phase": phase,
+                    "content": [{"type": "output_text", "text": text}]}}
+        first, last = event("old answer", "final_answer"), event("new answer", "commentary")
+        stream = b"data: " + json.dumps(first).encode() + b"\n\n"
+        stream += b"\n".join(b"data: " + line.encode() for line in json.dumps(last, indent=2).splitlines()) + b"\n\n"
+        for ending in (b"\n", b"\r\n", b"\r"):
+            for size in (1, 7, 4096):
+                with self.subTest(ending=ending, chunk=size):
+                    gateway = pair.ModelGateway("codex", fixture_port=1)
+                    self.exchange(gateway, stream.replace(b"\n", ending), size)
+                    self.assertEqual(gateway.final_phase, "commentary")
+                    self.assertEqual(gateway.final_text_sha256, hashlib.sha256(b"new answer").hexdigest())
+
+    def test_non_object_sse_json_does_not_abort_forwarding(self):
+        for value in (None, [], 42, "text"):
+            with self.subTest(value=value):
+                gateway = pair.ModelGateway("codex", fixture_port=1)
+                self.exchange(gateway, b"data: " + json.dumps(value).encode() + b"\n\n", 1)
+                self.assertIsNone(gateway.final_phase)
+
+    def test_deep_sse_json_does_not_abort_forwarding(self):
+        gateway = pair.ModelGateway("codex", fixture_port=1)
+        self.exchange(gateway, b"data: " + b"[" * 1200 + b"0" + b"]" * 1200 + b"\n\n", 7)
+        self.assertIsNone(gateway.final_phase)
+
+    def test_an_unterminated_sse_event_is_not_a_completed_answer(self):
+        message = {"type": "message", "role": "assistant", "phase": "final_answer",
+                   "content": [{"type": "output_text", "text": "unfinished"}]}
+        stream = b"data: " + json.dumps({"type": "response.output_item.done", "item": message}).encode() + b"\n"
+        gateway = pair.ModelGateway("codex", fixture_port=1)
+        self.exchange(gateway, stream, 7)
+        self.assertIsNone(gateway.final_phase)
+
     def stream(self, *items):
         events = [{"type": "response.created", "response": {}}]
         for item in items:
@@ -723,7 +780,7 @@ class LargeProfileTests(unittest.TestCase):
             outcome = {key: value for key, value in COMPLETED.items() if key not in ("status", "model")}
             with patch.object(pair, "load_config", return_value=(config, {"client": "codex", "inputs": self.INPUTS}, rea)), \
                     patch.object(pair, "identity", return_value={"id": 1}), patch.object(pair, "CodexLogin", Login), \
-                    patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=None)) as gateway, \
+                    patch.object(pair, "ModelGateway", return_value=SimpleNamespace(final_phase=None, final_text_sha256=None)) as gateway, \
                     patch.object(pair, "exercise", return_value=(outcome, {"stdout": bytearray(), "stderr": bytearray()})) as exercise:
                 try:
                     pair.run(SimpleNamespace(config=str(config), model="model-x", prompt_file=None, template="triage", target=[target],
@@ -736,7 +793,29 @@ class LargeProfileTests(unittest.TestCase):
                 self.assertEqual(exercise.call_args.kwargs["tool_timeout"], started["tool_timeout"])
                 self.assertEqual(exercise.call_args.kwargs["timeout"], started["timeout"])
                 self.last_started = started
+                self.last_exercise = exercise.call_args
                 return exercise.call_args.kwargs["prompt"], started["rea_profile"]
+
+    def test_effective_targets_are_forwarded_to_the_snapshot_and_broker(self):
+        self.run_with({}, "small.bin")
+        self.assertEqual(self.last_exercise.kwargs.get("targets"), ["small.bin"])
+
+    def test_large_guidance_cannot_overflow_the_worker_prompt_limit(self):
+        original = pair.build_prompt
+        def bounded(args, config):
+            prompt, targets = original(args, config)
+            return "x" * (128 * 1024), targets
+        with patch.object(pair, "build_prompt", side_effect=bounded):
+            result = self.run_with({"profile": "large"}, "libbig.so")
+        self.assertTrue(isinstance(result, str))
+        self.assertIn("prompt", result.lower())
+
+    def test_only_effective_targets_are_staged(self):
+        inputs = [{"path": "small.bin", "size": 4}, {"path": "big.bin", "size": pair.boundary.LARGE_INPUT + 1}]
+        with patch.object(pair.boundary, "preflight"), patch.object(pair.input_snapshot, "stage", side_effect=RuntimeError("snapshot stop")) as stage:
+            with self.assertRaisesRegex(RuntimeError, "snapshot stop"):
+                pair.exercise({"inputs": inputs}, {"input_dir": "/approved"}, prompt="x", gateway=None, timeout=1, targets=["small.bin"])
+        self.assertEqual(stage.call_args.args, ("/approved", inputs[:1]))
 
     def test_large_targets_need_the_large_profile_before_any_request(self):
         for rea in ({}, {"profile": "standard"}):
@@ -793,6 +872,27 @@ class LargeProfileTests(unittest.TestCase):
 
 
 class MCPPolicyTests(unittest.TestCase):
+    def test_javascript_directory_targets_contain_only_effective_files(self):
+        policy = pair.MCPPolicy([{"path": "app/main.js", "size": 4}])
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "analyze_javascript_application", "arguments": {"input_path": "/input/app"}}}
+        self.assertIsNotNone(policy.request(json.dumps(request).encode()))
+        request["params"]["arguments"]["input_path"] = "/input/other"
+        with self.assertRaises(tunnel.ProtocolError):
+            pair.MCPPolicy([{"path": "app/main.js", "size": 4}]).request(json.dumps(request).encode())
+
+    def test_actual_opens_are_scoped_to_targets_and_native_profile_size(self):
+        inputs = [{"path": "small.bin", "size": 4}, {"path": "big.apk", "size": pair.boundary.LARGE_INPUT + 1}]
+        def request(name, path):
+            return json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {"path": path}}}).encode()
+        for name in ("open_binary", *sorted(tunnel.ANDROID_TOOLS)):
+            with self.subTest(name=name), self.assertRaises(tunnel.ProtocolError):
+                pair.MCPPolicy(inputs[:1]).request(request(name, "/input/big.apk"))
+        with self.assertRaises(tunnel.ProtocolError):
+            pair.MCPPolicy(inputs).request(request("open_binary", "/input/big.apk"))
+        self.assertIsNotNone(pair.MCPPolicy(inputs, rea_profile="large").request(request("open_binary", "/input/big.apk")))
+        self.assertIsNotNone(pair.MCPPolicy(inputs).request(request("inspect_android_package", "/input/big.apk")))
+
     def test_only_successful_actual_rea_results_count_as_completed_calls(self):
         policy = pair.MCPPolicy()
         for identifier, result in ((1, {"error": {"code": -1}}), (2, {"result": {"isError": True}}),
