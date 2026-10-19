@@ -1,0 +1,350 @@
+{
+  "images": {
+    "agent": {
+      "added_occurrences": 0,
+      "after_id": "sha256:105fb3ea7144d0dac960b3f9393bcbd4239ead0ae58a2545f91e8207a6d39e3c",
+      "after_summary": {
+        "package_occurrences_by_type": {
+          "debian": 114,
+          "node-pkg": 151
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 2,
+          "HIGH": 71,
+          "LOW": 123,
+          "MEDIUM": 142,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 2,
+          "HIGH": 74,
+          "LOW": 124,
+          "MEDIUM": 149,
+          "UNKNOWN": 1
+        }
+      },
+      "before_id": "sha256:4e8440db777d2d4f31b6805bf7cc2ad86af89775baed9a166bba2a5ac4dbd3a7",
+      "before_summary": {
+        "package_occurrences_by_type": {
+          "debian": 114,
+          "node-pkg": 151
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 2,
+          "HIGH": 71,
+          "LOW": 123,
+          "MEDIUM": 142,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 5,
+          "HIGH": 78,
+          "LOW": 124,
+          "MEDIUM": 155,
+          "UNKNOWN": 1
+        }
+      },
+      "perl_base_after": [
+        "5.36.0-7+deb12u4"
+      ],
+      "perl_base_before": [
+        "5.36.0-7+deb12u3"
+      ],
+      "remaining_critical": [
+        {
+          "fixed_version": null,
+          "package": "libsqlite3-0",
+          "package_path": null,
+          "status": "affected",
+          "type": "debian",
+          "version": "3.40.1-2+deb12u2",
+          "vulnerability_id": "CVE-2025-7458"
+        },
+        {
+          "fixed_version": null,
+          "package": "zlib1g",
+          "package_path": null,
+          "status": "will_not_fix",
+          "type": "debian",
+          "version": "1:1.2.13.dfsg-1",
+          "vulnerability_id": "CVE-2023-45853"
+        }
+      ],
+      "removed_occurrences": [
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2025-15649"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-12087"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-13221"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-19487"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-42496"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-42497"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-48959"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-48962"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-57432"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-57433"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-7010"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-7017"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-8376"
+        }
+      ]
+    },
+    "rea": {
+      "added_occurrences": 0,
+      "after_id": "sha256:c6dc2e5a6a9eb837220cdec87324b5bce30c344766a6bd5166787a6a9775b9ea",
+      "after_summary": {
+        "package_occurrences_by_type": {
+          "debian": 94,
+          "jar": 109,
+          "node-pkg": 296
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 1,
+          "HIGH": 60,
+          "LOW": 90,
+          "MEDIUM": 96,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 3,
+          "HIGH": 67,
+          "LOW": 91,
+          "MEDIUM": 105,
+          "UNKNOWN": 1
+        }
+      },
+      "before_id": "sha256:55b00b3fa7a5cde016bc5d4d733e90352fa3c4d196262177142264d98aefaa1b",
+      "before_summary": {
+        "package_occurrences_by_type": {
+          "debian": 94,
+          "jar": 109,
+          "node-pkg": 296
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 1,
+          "HIGH": 60,
+          "LOW": 90,
+          "MEDIUM": 96,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 6,
+          "HIGH": 71,
+          "LOW": 91,
+          "MEDIUM": 111,
+          "UNKNOWN": 1
+        }
+      },
+      "perl_base_after": [
+        "5.36.0-7+deb12u4"
+      ],
+      "perl_base_before": [
+        "5.36.0-7+deb12u3"
+      ],
+      "remaining_critical": [
+        {
+          "fixed_version": null,
+          "package": "zlib1g",
+          "package_path": null,
+          "status": "will_not_fix",
+          "type": "debian",
+          "version": "1:1.2.13.dfsg-1",
+          "vulnerability_id": "CVE-2023-45853"
+        },
+        {
+          "fixed_version": "4.2.17.Final, 4.1.137.Final",
+          "package": "io.netty:netty-handler",
+          "package_path": "opt/ghidra/Ghidra/Features/GhidraServer/data/yajsw-stable-13.18/lib/core/netty/netty-handler-4.2.6.Final.jar",
+          "status": "fixed",
+          "type": "jar",
+          "version": "4.2.6.Final",
+          "vulnerability_id": "CVE-2026-75595"
+        },
+        {
+          "fixed_version": "1.85",
+          "package": "org.bouncycastle:bcprov-jdk18on",
+          "package_path": "opt/ghidra/Ghidra/Framework/Generic/lib/bcprov-jdk18on-1.84.jar",
+          "status": "fixed",
+          "type": "jar",
+          "version": "1.84",
+          "vulnerability_id": "CVE-2026-8763"
+        }
+      ],
+      "removed_occurrences": [
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2025-15649"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-12087"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-13221"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-19487"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-42496"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-42497"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-48959"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-48962"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-57432"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-57433"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-7010"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-7017"
+        },
+        {
+          "count": 1,
+          "package": "perl-base",
+          "package_path": "",
+          "type": "debian",
+          "vulnerability_id": "CVE-2026-8376"
+        }
+      ]
+    }
+  },
+  "policy": "report-only: all severities and unfixed findings included; errors fail",
+  "same_database_bytes": {
+    "db": true,
+    "java-db": true
+  },
+  "provenance_record": "image-scan-macos-arm64-2026-10-19.json",
+  "scope": "macOS ARM64; occurrences are not unique CVEs or proof of exploitability"
+}

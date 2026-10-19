@@ -62,7 +62,7 @@ that is not already authorized.
 
 Keep REA, npm and the receiving agent inside separate restricted Docker
 containers. Preserve network=none, read-only roots, resource limits and the
-22-tool MCP allowlist. The agent must have zero host mounts. Share only
+27-tool MCP allowlist. The agent must have zero host mounts. Share only
 frozen copies of explicitly selected input bytes with REA.
 
 For live analysis, use my own subscription: a `claude setup-token` login
@@ -72,6 +72,12 @@ Never use API keys, and never reuse my everyday Codex login.
 Keep private control files, selected inputs, logins and outputs out of Git
 and webroots. Preserve existing global client settings. Never attach REA to
 this privileged host conversation or fall back to host execution.
+
+On macOS inspect Docker Desktop's VM shares, following docs/desktop-hardening.md.
+Propose a dedicated private staging root and the strict saved-sharing policy;
+obtain approval before changing global shares or restarting Desktop, since
+other projects may depend on them. Report saved settings separately from
+effective VM isolation. Preserve unknown platform results as unknown.
 
 Verify the policy suite, isolation checks and real offline REA analysis
 without any model login. Report actual results, image IDs, successful REA
@@ -231,6 +237,12 @@ A changed helper, image, deployment or host OS invalidates verification.
 Inspection and isolation checks run on every launch. The old direct host MCP
 entrypoint and host receiving-session CLI are retired.
 
+On macOS, Desktop's VM can have broader host shares than the REA mount.
+The [dedicated staging guide](docs/desktop-hardening.md) restricts frozen copies
+to one private directory and lets launches require a matching saved-share
+policy. This reduces the host surface exposed after a runtime compromise;
+it does not prove the VM's effective mounts or eliminate escape risks.
+
 ## Security controls and scope
 
 | Risk | Enforced control | Remaining trust |
@@ -304,6 +316,13 @@ Both audits ran inside the pinned Node Docker image. Builds use `npm ci` against
 those exact locks. See [raw JSON reports, lock hashes and audit scope](docs/npm-audit.md).
 This covers known npm advisories, not OS image packages, malware, undisclosed
 flaws or Docker itself. The earlier setup-preview audit is retained separately.
+
+**Whole-image scans do report vulnerabilities.** A separate digest-pinned
+scanner produces full reports and CycloneDX SBOMs for both images, including
+unfixed findings. Debian security updates removed 13 reported occurrences per
+image in the first comparison; remaining findings and coverage limits are
+documented in [the image audit](docs/image-audit.md). A clean npm audit must not
+be read as a clean image audit.
 
 ## Requirements
 
@@ -461,7 +480,7 @@ The workflow runs native policy checks on Linux, macOS and Windows and includes 
 two-container integration job on Linux. Native macOS integration uses Docker
 Desktop. Windows support remains experimental until native Docker integration
 is verified; passing Windows Python tests alone does not establish that layer.
-The [public verification run](https://github.com/dagoSte/rea-safe-agents/actions/runs/39140058024)
+The [preceding public verification run](https://github.com/dagoSte/rea-safe-agents/actions/runs/39260136503)
 passed all four jobs: Linux/macOS/Windows policy checks and native Linux real
 analysis through both contained clients. See the [dated validation record](docs/validation.md)
 for exact pass/skip counts and remaining Windows runtime coverage.
@@ -469,6 +488,24 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 ## What's new
 
 Improvements since the first public release, newest first.
+
+### Desktop sharing, generated boundary tests and image inventories
+
+A configurable private `--staging-root` keeps frozen copies out of general
+temporary folders. On macOS, `--desktop-share-policy strict` refuses a launch
+unless the saved Desktop virtual-share list contains only that root. Missing,
+conflicting or unsupported saved settings fail the strict check; no helper
+changes global Desktop settings. See [the guide and platform limits](docs/desktop-hardening.md).
+
+The controller suite adds 3,702 reproducible generated cases, with independent
+oracles and seven guard mutations that the tests must detect. This extends
+regression coverage; it is not an external security audit.
+
+CI now inventories both images using digest-pinned Trivy, retaining full
+vulnerability JSON, CycloneDX SBOMs and provenance as artifacts. Scanner errors
+and stale databases fail; vulnerability findings remain visible under an
+explicit report-only policy. Both Dockerfiles apply available Debian security
+updates while preserving the reviewed application pins.
 
 ### Android apps
 

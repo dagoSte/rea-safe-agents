@@ -32,7 +32,7 @@ from model_policy import validate_body
 from tunnel import ANDROID_TOOLS, MAX_BODY, MAX_RESPONSE, MAX_TOOL_TEXT, MAX_TRANSCRIPT, STATIC_TOOLS, ProtocolError, Wire, decode_json, digest, pack, read_frame, require, unpack
 
 HERE = Path(__file__).resolve()
-HELPERS = ("agent_container.py", "agent_worker.py", "agent_session.py", "container.py", "input_snapshot.py", "model_policy.py", "offline_model.py", "tunnel.py", "probe.js")
+HELPERS = ("agent_container.py", "agent_worker.py", "agent_session.py", "container.py", "desktop_policy.py", "input_snapshot.py", "model_policy.py", "offline_model.py", "tunnel.py", "probe.js")
 WORKER_FILES = ("agent_worker.py", "agent_session.py", "tunnel.py")
 TOOLS = STATIC_TOOLS
 # The one argument through which a tool names a file; it must be in /input.
@@ -146,6 +146,7 @@ def configure(args):
     require(image.get("Config", {}).get("Entrypoint") == AGENT_ENTRY and image.get("Config", {}).get("User") == "node", "Review the bundled agent image first")
     selected = input_snapshot.manifest(Path(rea["input_dir"]))
     output = private_output(args.output)
+    boundary.keep_outside_staging(rea, output)
     config_name(output)
     require(not output.exists(), "Refusing to overwrite an approved paired deployment")
     require(Path(rea["input_dir"]) not in output.parents, "Control state must stay outside the selected input")
@@ -177,6 +178,7 @@ def load_config(raw):
     require(digest(value["rea_config"]) == value["rea_sha256"], "REA deployment changed; review and configure again")
     rea = decode_json(Path(value["rea_config"]).read_bytes())
     boundary.validate_config(rea)
+    boundary.keep_outside_staging(rea, path)
     return path, value, rea
 
 
@@ -745,8 +747,8 @@ def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, too
     selected = {item["path"] for item in config["inputs"]} if targets is None else set(targets)
     require(bool(selected) and selected <= {item["path"] for item in config["inputs"]}, "Invalid effective targets")
     inputs = [item for item in config["inputs"] if item["path"] in selected]
-    boundary.preflight(rea)
-    temporary, snapshot = input_snapshot.stage(rea["input_dir"], inputs)
+    runtime = boundary.preflight(rea)
+    temporary, snapshot = input_snapshot.stage(rea["input_dir"], inputs, staging_root=rea.get("staging_root"))
     managed = Containers(rea)
     incoming = queue.Queue(maxsize=16)
     transcripts = {"stdout": bytearray(), "stderr": bytearray()}
@@ -842,7 +844,7 @@ def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, too
                 "completed_rea_calls": policy.completed_tools,
                 "model_requests": gateway.requests, "host_write_marker_absent": True,
                 "original_input_directory_mounted": False, "agent_mount_count": 0,
-                "both_containers_network": "none",
+                "both_containers_network": "none", "host_runtime": runtime,
                 # The worker environment holds no credential; the Claude process holds its own login.
                 "client_holds_subscription_login": config["client"] == "claude"}, transcripts
     except BaseException:
@@ -949,6 +951,9 @@ def run(args):
     requests, turns, timeout = budgets(targets, large)
     tool_timeout = boundary.profile_of(rea)["tool_timeout"]
     output = private_output(args.output)
+    boundary.keep_outside_staging(rea, output)
+    if args.codex_login:
+        boundary.keep_outside_staging(rea, args.codex_login)
     require(not output.exists(), "Use a new private output directory for every fresh contained session")
     if config["client"] == "claude":
         # The user's own `claude setup-token` login, held in memory for this run:
@@ -1111,6 +1116,7 @@ def codex_login(args):
     _, config, rea = load_config(args.config)
     require(config["client"] == "codex", "Use the Codex paired configuration")
     output = private_output(args.output)
+    boundary.keep_outside_staging(rea, output)
     require(not output.exists() and output.parent.is_dir(), "Use a new file in an existing private control directory")
     boundary.preflight(rea)
     # The only network-enabled container: the pinned official client signs in

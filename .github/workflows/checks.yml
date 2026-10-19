@@ -29,7 +29,7 @@ jobs:
         run: python tests/verify_windows_profile.py
   runtime-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -47,4 +47,26 @@ jobs:
       - name: Build both pinned receiving clients
         run: docker --context rea-verification build --file skills/rea-isolated/assets/agent/Dockerfile --tag rea-agent-local:codex-0.163.0-claude-2.1.302-locked skills/rea-isolated
       - name: Verify both real clients and real REA analysis without a model API
-        run: python tests/verify_runtime.py --context rea-verification --scratch-root "$RUNNER_TEMP"
+        run: python tests/verify_runtime.py --context rea-verification --scratch-root "$RUNNER_TEMP" > "$RUNNER_TEMP/runtime-verification.json"
+      - name: Pull the digest-pinned image scanner
+        run: |
+          python - <<'PY'
+          import subprocess
+          import sys
+          sys.path.insert(0, "tools")
+          from scan_images import SCANNER_IMAGE
+          subprocess.run(["docker", "--context", "rea-verification", "pull", SCANNER_IMAGE], check=True)
+          PY
+      - name: Inventory both built images and report all vulnerability findings
+        run: python tools/scan_images.py --context rea-verification --output-dir "$RUNNER_TEMP/image-scan"
+      - name: Retain runtime evidence, image reports and SBOMs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-audit-linux-amd64-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/runtime-verification.json
+            ${{ runner.temp }}/image-scan/*.json
+            ${{ runner.temp }}/image-scan/*.log
+          if-no-files-found: warn
+          retention-days: 14

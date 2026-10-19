@@ -17,7 +17,7 @@ import check_versions as versions
 DIGEST_A, DIGEST_B = "sha256:" + "a" * 64, "sha256:" + "b" * 64
 PINNED_FILES = ("package.json", "package-lock.json", "Dockerfile", "agent/package.json", "agent/package-lock.json", "agent/Dockerfile")
 EXECUTABLE_FILES = (versions.SCRIPTS / "agent_session.py", versions.SCRIPTS / "agent_container.py",
-                    Path(".github/workflows/checks.yml"), Path("tests/verify_runtime.py"))
+                    Path(".github/workflows/checks.yml"), Path("tests/verify_runtime.py"), Path("tools/scan_images.py"))
 
 
 def copy_pinned_tree(root):
@@ -54,7 +54,7 @@ class PinTests(unittest.TestCase):
             copy_pinned_tree(root)
             real = versions.read_pins(ROOT)
             replaced = {"rea-agents": "7.8.9", "claude-code": "5.6.7", "codex": "0.900.1", "ghidra": "7.3.2",
-                        "temurin-jdk-21": "21.0.99+4", "node": "24.98.1", "node-image": DIGEST_A}
+                        "temurin-jdk-21": "21.0.99+4", "node": "24.98.1", "node-image": DIGEST_A, "trivy": "1.2.3"}
             for name, components in {"package.json": ["rea-agents"], "agent/package.json": ["claude-code", "codex"],
                                      "Dockerfile": ["ghidra", "node", "node-image"], "agent/Dockerfile": ["node", "node-image"]}.items():
                 path = root / versions.ASSETS / name
@@ -65,6 +65,8 @@ class PinTests(unittest.TestCase):
             dockerfile = root / versions.ASSETS / "Dockerfile"
             old_jdk, old_build = real["temurin-jdk-21"].split("+")
             dockerfile.write_text(dockerfile.read_text().replace("jdk-" + old_jdk + "%2B" + old_build, "jdk-21.0.99%2B4"))
+            scanner = root / "tools/scan_images.py"
+            scanner.write_text(scanner.read_text().replace(real["trivy"], replaced["trivy"]))
             self.assertEqual(versions.read_pins(root), replaced)
             manifest = root / versions.ASSETS / "agent/package.json"
             manifest.write_text(manifest.read_text().replace('"0.900.1"', '"00.900.1"'))
@@ -74,6 +76,20 @@ class PinTests(unittest.TestCase):
             agent = root / versions.ASSETS / "agent/Dockerfile"
             agent.write_text(agent.read_text().replace(DIGEST_A, DIGEST_B))
             with self.assertRaises(ValueError):  # both images must share one Node version and digest
+                versions.read_pins(root)
+
+    def test_scanner_version_must_match_the_digest_pinned_image_tag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            copy_pinned_tree(root)
+            scanner = root / "tools/scan_images.py"
+            original = scanner.read_text()
+            pinned = versions.read_pins(root)["trivy"]
+            scanner.write_text(original.replace(f'SCANNER_VERSION = "{pinned}"', 'SCANNER_VERSION = "9.9.9"'))
+            with self.assertRaisesRegex(ValueError, "Trivy version and digest-pinned scanner image disagree"):
+                versions.read_pins(root)
+            scanner.write_text(original.replace("@sha256:", "@sha512:"))
+            with self.assertRaises(ValueError):
                 versions.read_pins(root)
 
     def test_a_partial_update_is_reported_as_inconsistent(self):
@@ -205,6 +221,14 @@ class PinTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_scanner_release_update_is_reported_with_digest_scope_limit(self):
+        pins = versions.read_pins(ROOT)
+        latest = current_latest(pins) | {"trivy": ("999.0.0", "release version only")}
+        rows, behind, markdown = versions.report(ROOT, pins, latest, [])
+        self.assertTrue(behind)
+        self.assertEqual({row["component"]: row["status"] for row in rows}["trivy"], "update available")
+        self.assertIn("same-version scanner tag rebuilds are outside", markdown)
+
     def test_versions_compare_per_component(self):
         key = versions.comparable
         self.assertLess(key("temurin-jdk-21", "21.0.12+11"), key("temurin-jdk-21", "21.0.12.1+1"))
@@ -225,7 +249,8 @@ class ComparisonTests(unittest.TestCase):
                 patch.object(versions, "ghidra_releases", return_value=[pins["ghidra"]]), \
                 patch.object(versions, "temurin_21_latest", return_value=pins["temurin-jdk-21"]), \
                 patch.object(versions, "node_latest", return_value=pins["node"]), \
-                patch.object(versions, "node_image_digest", return_value=pins["node-image"]):
+                patch.object(versions, "node_image_digest", return_value=pins["node-image"]), \
+                patch.object(versions, "trivy_latest", return_value=pins["trivy"]):
             latest = versions.latest_versions(pins)
         for name in ("rea-agents", "claude-code", "codex"):
             self.assertEqual(latest[name], (None, "check failed: ValueError"))
@@ -240,7 +265,8 @@ class ComparisonTests(unittest.TestCase):
                 patch.object(versions, "npm_latest", side_effect=OSError("offline")), \
                 patch.object(versions, "temurin_21_latest", return_value="21.0.13+11"), \
                 patch.object(versions, "node_latest", return_value=pins["node"]), \
-                patch.object(versions, "node_image_digest", return_value=pins["node-image"]):
+                patch.object(versions, "node_image_digest", return_value=pins["node-image"]), \
+                patch.object(versions, "trivy_latest", return_value=pins["trivy"]):
             latest = versions.latest_versions(pins)
         self.assertEqual(latest["ghidra"][0], "7.3.5")
         self.assertIn("7.4", latest["ghidra"][1])
@@ -257,6 +283,12 @@ class ComparisonTests(unittest.TestCase):
 
 
 class SourceTests(unittest.TestCase):
+    def test_unstable_or_invalid_scanner_release_is_rejected(self):
+        for release in ({"tag_name": "v0.77.0", "prerelease": True}, {"tag_name": "v0.77.0", "draft": True},
+                        {"tag_name": []}, {"tag_name": "0.77.0"}):
+            with self.subTest(release=release), patch.object(versions, "fetch_json", return_value=release), self.assertRaises(ValueError):
+                versions.trivy_latest()
+
     def test_each_upstream_source_is_queried_and_parsed(self):
         answers = {
             "https://registry.npmjs.org/rea-agents/latest": {"version": "6.8.0"},
@@ -268,6 +300,7 @@ class SourceTests(unittest.TestCase):
                 {"release_name": "jdk-21.0.13+11"}],
             "https://nodejs.org/dist/index.json": [{"version": "v25.1.0"}, {"version": "v24.30.2"}, {"version": "v24.30.1"}],
             "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/node:pull": {"token": "registry-token"},
+            "https://api.github.com/repos/aquasecurity/trivy/releases/latest": {"tag_name": "v0.77.0", "draft": False, "prerelease": False},
         }
         seen = []
         def answer(request, timeout):
@@ -282,6 +315,7 @@ class SourceTests(unittest.TestCase):
             self.assertEqual(versions.temurin_21_latest(), "21.0.13+11")
             self.assertEqual(versions.node_latest("24"), "24.30.2")
             self.assertEqual(versions.node_image_digest("24.30.2"), DIGEST_B)
+            self.assertEqual(versions.trivy_latest(), "0.77.0")
         authorization = {url: token for url, _, token in seen}
         self.assertEqual(authorization["https://api.github.com/repos/NationalSecurityAgency/ghidra/releases?per_page=50"], "Bearer synthetic")
         manifest = "https://registry-1.docker.io/v2/library/node/manifests/24.30.2-bookworm-slim"

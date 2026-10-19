@@ -1,0 +1,138 @@
+{
+  "databases": {
+    "db": {
+      "age_hours": 0.492,
+      "database_sha256": "sha256:af00da8f6d4b1bf2d319b6140e52e811c3ab425e6ea44d6a117830d946ac2354",
+      "max_age_hours": 48,
+      "metadata": {
+        "DownloadedAt": "2026-10-19T13:56:16.881250544Z",
+        "NextUpdate": "2026-10-20T13:35:30.519058502Z",
+        "UpdatedAt": "2026-10-19T13:35:30.519058742Z",
+        "Version": 2
+      },
+      "metadata_sha256": "sha256:d19470afdb91037deba7b09b6d4f73b33a5dd71407f11c946785d0bc28a578f0",
+      "repository": "ghcr.io/aquasecurity/trivy-db:2"
+    },
+    "java-db": {
+      "age_hours": 13.08,
+      "database_sha256": "sha256:8cbe11f16c7629ee00726af7dd2f10d436f2e9803474d28e91810cf1606c5621",
+      "max_age_hours": 96,
+      "metadata": {
+        "DownloadedAt": "2026-10-19T14:00:13.965423584Z",
+        "NextUpdate": "2026-10-22T01:00:16.492702584Z",
+        "UpdatedAt": "2026-10-19T01:00:16.492703225Z",
+        "Version": 1
+      },
+      "metadata_sha256": "sha256:5c19f20c94c588249edad4b3c7ac329cac9d5506282256d0904e3df515ead23a",
+      "repository": "ghcr.io/aquasecurity/trivy-java-db:1"
+    }
+  },
+  "declared_build_pins": {
+    "claude-code": "2.1.302",
+    "codex": "0.163.0",
+    "ghidra": "12.1.4",
+    "node": "24.22.0",
+    "node-image": "sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5",
+    "rea-agents": "6.7.0",
+    "temurin-jdk-21": "21.0.12.1+1",
+    "trivy": "0.76.0"
+  },
+  "finished_at": "2026-10-19T14:06:26.508682+00:00",
+  "images": {
+    "agent": {
+      "archive_sha256": "sha256:8d4876e987c5981b03eed69eda9dc66b028228082bfa90002deeae7d85d14cff",
+      "inspection": {
+        "Architecture": "arm64",
+        "Created": "2026-10-19T14:04:29.065406841Z",
+        "Id": "sha256:105fb3ea7144d0dac960b3f9393bcbd4239ead0ae58a2545f91e8207a6d39e3c",
+        "Os": "linux",
+        "RepoDigests": []
+      },
+      "reference": "rea-agent-local:codex-0.163.0-claude-2.1.302-locked",
+      "report": "agent.trivy.json",
+      "report_sha256": "sha256:92d56d899e7caa9ab1c42acdca6be48e7d1855da8503322803ab267bbeabb112",
+      "sbom": "agent.cyclonedx.json",
+      "sbom_sha256": "sha256:abc3f3767ee32d1e09fe7bb8a5e24b06fcd3734774e2d264bd81d38d1dfd7c31",
+      "status": "complete",
+      "summary": {
+        "package_occurrences_by_type": {
+          "debian": 114,
+          "node-pkg": 151
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 2,
+          "HIGH": 71,
+          "LOW": 123,
+          "MEDIUM": 142,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 2,
+          "HIGH": 74,
+          "LOW": 124,
+          "MEDIUM": 149,
+          "UNKNOWN": 1
+        }
+      }
+    },
+    "rea": {
+      "archive_sha256": "sha256:c7545d0b80860365252f2abf5c08311fc9c005f8c52fd970c0f8c7336352a5d1",
+      "inspection": {
+        "Architecture": "arm64",
+        "Created": "2026-10-19T14:03:25.563401881Z",
+        "Id": "sha256:c6dc2e5a6a9eb837220cdec87324b5bce30c344766a6bd5166787a6a9775b9ea",
+        "Os": "linux",
+        "RepoDigests": []
+      },
+      "reference": "rea-local:6.7.0-ghidra-12.1.4-locked",
+      "report": "rea.trivy.json",
+      "report_sha256": "sha256:358ea44d80ac8b68b705c9e13222536f84b16fa7df925a7348d70270c5f07a4e",
+      "sbom": "rea.cyclonedx.json",
+      "sbom_sha256": "sha256:a8e30e6e6eff39f9c59a7a743f4c49e80aa34dbf97c98940ad64d429694e1ae8",
+      "status": "complete",
+      "summary": {
+        "package_occurrences_by_type": {
+          "debian": 94,
+          "jar": 109,
+          "node-pkg": 296
+        },
+        "unfixed_occurrences_by_severity": {
+          "CRITICAL": 1,
+          "HIGH": 60,
+          "LOW": 90,
+          "MEDIUM": 96,
+          "UNKNOWN": 1
+        },
+        "vulnerability_occurrences_by_severity": {
+          "CRITICAL": 3,
+          "HIGH": 67,
+          "LOW": 91,
+          "MEDIUM": 105,
+          "UNKNOWN": 1
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Known-vulnerability matching is not an exploitability assessment or a guarantee of safety.",
+    "Offline scanning can miss dependencies that require remote Maven resolution.",
+    "Downloaded JDKs and arbitrary native executables (including Ghidra, Codex and Claude binaries) may lack supported package metadata; their vulnerability coverage is not guaranteed.",
+    "The SBOM contains components recognized by this scanner, not every file or statically linked library."
+  ],
+  "policy": "report-only: all severities and unfixed findings included; errors fail",
+  "scanner": {
+    "image": "ghcr.io/aquasecurity/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222",
+    "inspection": {
+      "Architecture": "arm64",
+      "Created": "2026-10-14T11:43:50.279137371Z",
+      "Id": "sha256:eb6f27a58c0dd63dbc540af14ec0520342757be478e1e244eaf56f95740e66fb",
+      "Os": "linux",
+      "RepoDigests": [
+        "ghcr.io/aquasecurity/trivy@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222"
+      ]
+    },
+    "version": "0.76.0"
+  },
+  "started_at": "2026-10-19T14:05:01.406176+00:00",
+  "status": "complete"
+}

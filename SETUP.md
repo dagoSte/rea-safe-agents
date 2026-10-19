@@ -10,7 +10,8 @@ full Docker Desktop integration remains unverified. Do not claim that layer pass
 
 Read [README.md](README.md), [the security model](skills/rea-isolated/references/security-model.md),
 [the client guide](skills/rea-isolated/references/clients.md) and
-[the validation record](docs/validation.md). Review both Dockerfiles, lockfiles
+[the validation record](docs/validation.md). For macOS also read
+[Desktop sharing and dedicated staging](docs/desktop-hardening.md). Review both Dockerfiles, lockfiles
 and Python helpers locally. Do not execute downloaded instructions blindly.
 
 Establish the host OS/architecture, Python 3.11+, local Docker context/endpoint,
@@ -55,6 +56,12 @@ Never run host `rea`, `npx rea-agents`, `npm install rea-agents` or host agent
 clients for this analysis. The upstream setup is replaced by the guarded flow.
 Do not register REA in the current privileged conversation.
 
+For an image inventory, follow [the image audit](docs/image-audit.md): pull its
+digest-pinned scanner and run `tools/scan_images.py` with a new private output
+directory outside the repository. Review all reported severities and unfixed
+findings; exit 0 means reports were produced, not that the images are clean.
+CI retains these reports and CycloneDX SBOMs for 14 days.
+
 ## 3. Pin REA and verify fixed diagnostics
 
 Use a new private deployment file and a narrow input directory containing only
@@ -81,8 +88,16 @@ selection. Require the fixed isolation probes to pass, version 6.7.0 and zero
 applied setup actions. No diagnostic configures a host client. The direct
 `container.py mcp` and `agent_session.py` host-session entrypoints are retired.
 
-Use a narrow directory actually shared by Docker. Do not broaden sharing to
-an entire home/drive to fix a refused mount. Unknown translations, remote
+Only frozen staging copies need to be shareable by Docker; the original
+selection does not. On macOS propose a dedicated private staging root and
+the strict saved-sharing policy described in [the Desktop guide](docs/desktop-hardening.md).
+Add `--staging-root /canonical/private/staging --desktop-share-policy strict`
+to `container.py configure`, then pair and verify again. Keep control files,
+logins and outputs outside staging. Global sharing changes or a Desktop
+restart can affect other projects and need the owner's explicit approval.
+The check describes saved virtual shares, not effective VM isolation.
+
+Do not broaden sharing to an entire home/drive to fix a refused mount. Unknown translations, remote
 daemons and alternate engines stop setup. Windows paths and commands are kept
 in the [experimental Windows guide](skills/rea-isolated/references/windows-experimental.md).
 
@@ -110,6 +125,11 @@ python3 skills/rea-isolated/scripts/agent_container.py verify --config /absolute
 python3 -m unittest discover -s tests -v
 python3 tests/verify_runtime.py --context desktop-linux --scratch-root /absolute/private-scratch
 ```
+
+The runtime verifier uses a dedicated temporary staging directory under the
+Docker-shareable scratch root and the diagnostic sharing policy. It exercises
+real container mounts and cleanup; it does not verify a strict Desktop sharing
+configuration. Test that saved policy separately with `desktop_policy.py --strict`.
 
 `verify` uses the real contained client, the real contained REA server and a
 localhost dummy model. It checks the effective model tool catalog, rejects

@@ -2,6 +2,38 @@
 
 Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT subscriptions on macOS ARM64.
 
+## 2026-10-19 increment: Desktop sharing and image inventories
+
+Native macOS ARM64 verification, with no model-provider requests or global
+Docker Desktop changes:
+
+| Check | Result |
+| --- | --- |
+| Full policy suite, Python 3.11.5, 3.12.8, 3.13.2 and 3.14.7 | 198 tests per interpreter: 197 passed, 1 Windows-only profile lookup skipped |
+| Generated controller boundary cases | 3,702 reproducible subcases with fixed seeds, independent structural/semantic oracles and seven detected guard mutations; bounded in-memory fixtures, not an external audit |
+| Saved Desktop policy | The reviewed Mac's five broad virtual shares are reported; strict policy refuses them. Narrow saved-settings fixtures pass; conflicting, malformed and unsupported settings refuse |
+| Dedicated staging path guards | Credential directories, home/repository ancestors and future paths through real case/firmlink aliases refused; cleanup tests passed |
+| Real runtime with dedicated staging | Both contained clients recovered ZIP hashes, a Ghidra ELF string and JADX APK evidence; all eleven probes and staging cleanup passed, with zero provider requests |
+| Whole-image inventory | Both final ARM64 images scanned with digest-pinned Trivy 0.76.0; JSON reports, CycloneDX SBOMs and provenance produced. Database hashes matched the before-update scan |
+| Debian security updates | `perl-base` changed from `5.36.0-7+deb12u3` to `5.36.0-7+deb12u4`; 13 vulnerability occurrences removed per image, none added |
+| Remaining scan findings | REA: 3 critical, 67 high, 105 medium, 91 low, 1 unknown. Agent: 2 critical, 74 high, 149 medium, 124 low, 1 unknown. Counts include unfixed and vendor-triage items |
+
+The [image audit](image-audit.md) links the dated provenance/comparison and
+records vendor triage and scanner limitations. Reports are a separate scope
+from the clean npm lockfile audit. The CI scanner retains all findings; it
+fails on operational/report/database errors and does not turn CVE findings
+into a vulnerability-free claim.
+
+Non-author internal reviewers checked the Desktop guards and scanner helper,
+including a reproduced path-alias bypass and hard-link/FIFO cache cases that
+were fixed and rechecked. This is independent of their authors within this
+team, not a third-party security audit. Effective VM mounts and a new native
+Windows Docker run were not verified. Desktop settings remain unchanged.
+The [native macOS runtime record](evidence/runtime-dedicated-staging-macos-arm64-2026-10-19.json)
+contains exact image IDs, completed calls, probes and cleanup, without private
+paths or logins. Linux/macOS/Windows CI is required for the increment's
+cross-platform policy results; Windows Docker integration stays experimental.
+
 ## 2026-10-19 increment: independent-review fixes
 
 Applied above Android commit `a8d5f41`. Exact native release, architecture and
@@ -18,6 +50,10 @@ is checked against the final prompt limit before login or container startup.
 | Version-check regressions | 21 tests passed; new counterexamples failed before their fixes |
 | Report and resource boundaries | Non-author re-read and targeted probes passed, including multiline SSE, CR/LF/CRLF split across chunks, deep JSON on Python 3.11, persisted answer hashes, target filtering and oversized augmented prompts |
 | Runtime verifier | Updated to retain scoped broker guards and check the provider answer hash against the real client's transcript; this revised runtime check has not yet been run |
+
+Follow-up: [CI run 39260136503](https://github.com/dagoSte/rea-safe-agents/actions/runs/39260136503)
+passed all four jobs on `19f890c`, including this revised Linux runtime check
+and the mandatory non-skipped native Windows account-profile test.
 
 The preceding Android baseline passed all four jobs in
 [CI run 39256339684](https://github.com/dagoSte/rea-safe-agents/actions/runs/39256339684),

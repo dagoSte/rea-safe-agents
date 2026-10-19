@@ -13,6 +13,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import stat
+
+import desktop_policy
 
 try:
     import pwd
@@ -22,6 +25,7 @@ except ImportError:  # Windows has no account database module.
 
 MIN_DESKTOP = (4, 95, 0)
 MIN_ENGINE = (29, 8, 2)
+PROTECTED_HOME_DIRS = (".ssh", ".aws", ".azure", ".gnupg", ".kube", ".config", ".codex", ".claude", ".docker", "AppData", "Library")
 MEMORY = 2 * 1024**3
 CPUS = 2 * 10**9
 PIDS = 128
@@ -111,7 +115,8 @@ def preflight(config):
     if "Docker Desktop" in platform:
         desktop = semver(platform)
         require(desktop >= MIN_DESKTOP, "Docker Desktop is below the reviewed baseline; update it first")
-    return {"engine": server["Version"], "desktop": desktop, "container_os": "linux"}
+    sharing = desktop_policy.check(config, desktop=desktop is not None)
+    return {"engine": server["Version"], "desktop": desktop, "container_os": "linux", "host_sharing": sharing}
 
 
 def same_directory(first, second):
@@ -180,7 +185,7 @@ def input_directory(raw):
     homes = account_homes()
     require(not any(contains(resolved, home) for home in homes), "The home directory or its parents cannot be shared")
     for home in homes:
-        for name in (".ssh", ".aws", ".azure", ".gnupg", ".kube", ".config", ".codex", ".claude", ".docker", "AppData", "Library"):
+        for name in PROTECTED_HOME_DIRS:
             require(not contains(home / name, resolved), "Do not share a host credential or application-state directory")
     require(not any(c in str(resolved) for c in "\r\n\x00"), "Unsupported control character in input path")
     return str(resolved)
@@ -191,9 +196,38 @@ def profile_of(config):
     return PROFILES[config.get("profile", "standard")]
 
 
+def staging_directory(raw):
+    path = Path(raw)
+    require(path.is_absolute() and path.is_dir() and not path.is_symlink(), "Staging root must be an existing absolute real directory")
+    resolved = path.resolve(strict=True)
+    require(str(path) == str(resolved) and resolved.parent != resolved, "Use the canonical dedicated staging root")
+    protected = {Path(__file__).resolve().parents[1]}
+    protected.update(parent for parent in Path(__file__).resolve().parents if (parent / ".git").exists())
+    require(not any(contains(parent, resolved) or contains(resolved, parent) for parent in protected), "Staging must stay outside the skill and repository trees")
+    info = path.lstat()
+    require(not getattr(info, "st_file_attributes", 0) & 0x400, "Staging root cannot be a reparse point")
+    if os.name != "nt":
+        require(info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) & 0o077 == 0, "Staging root must be private to your account (mode 0700)")
+    for home in account_homes():
+        require(not contains(resolved, home), "Do not share an account home or its parents as staging")
+        for name in PROTECTED_HOME_DIRS:
+            require(not contains(home / name, resolved) and not contains(resolved, home / name), "Staging must not contain account credentials or application state")
+    return str(resolved)
+
+
+def keep_outside_staging(config, raw):
+    if config.get("staging_root"):
+        root, path = Path(config["staging_root"]), Path(raw).resolve()
+        require(root != path and root not in path.parents, "Control files, logins and outputs must stay outside shared staging")
+        # New paths can have existing parents reached through case aliases or
+        # macOS firmlinks; resolve() alone does not normalize that identity.
+        existing = next(parent for parent in (path, *path.parents) if parent.exists())
+        require(not contains(root, existing), "Control files, logins and outputs must stay outside shared staging")
+
+
 def validate_config(config):
     fields = {"schema", "docker", "docker_config", "context", "image_id", "input_dir"}
-    require(set(config) in (fields, fields | {"profile"}), "Unexpected configuration fields")
+    require(fields <= set(config) and set(config) <= fields | {"profile", "staging_root", "desktop_share_policy"}, "Unexpected configuration fields")
     require(config.get("profile", "standard") in PROFILES, "Unknown resource profile")
     require(config["schema"] == 1, "Unsupported configuration schema")
     binary = Path(config["docker"])
@@ -206,6 +240,14 @@ def validate_config(config):
     require(input_directory(config["input_dir"]) == config["input_dir"], "The input directory changed identity")
     source = Path(config["input_dir"])
     require(not contains(source, control) and not contains(control, source), "Docker control metadata cannot be shared with REA")
+    policy = config.get("desktop_share_policy", "diagnostic")
+    require(isinstance(policy, str) and policy in {"diagnostic", "strict"}, "Unknown Desktop sharing policy")
+    require(config.get("desktop_share_policy") != "strict" or "staging_root" in config, "Strict Desktop sharing requires a dedicated staging root")
+    if "staging_root" in config:
+        staging = Path(staging_directory(config["staging_root"]))
+        require(str(staging) == config["staging_root"], "Staging root changed identity")
+        require(not any(contains(first, second) or contains(second, first) for first, second in ((staging, source), (staging, control))),
+                "Staging, approved inputs and Docker control directories must be separate")
 
 
 def mount_spec(source):
@@ -309,7 +351,7 @@ def run_container(config, mode):
     validate_config(config)
     # Diagnostics need no user data. A renamed bind mount can defeat portable
     # credential-path filters, so never expose the original tree here either.
-    with tempfile.TemporaryDirectory(prefix="rea-diagnostic-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="rea-diagnostic-", dir=config.get("staging_root")) as scratch:
         empty = Path(scratch) / "input"
         empty.mkdir(mode=0o755)
         return _run_checked({**config, "input_dir": str(empty)}, mode)
@@ -341,6 +383,10 @@ def configure(args):
         "context": args.context, "image_id": "sha256:" + "0" * 64,
         "input_dir": input_directory(args.input_dir), "profile": args.profile,
     }
+    if getattr(args, "staging_root", None):
+        config["staging_root"] = staging_directory(args.staging_root)
+    if getattr(args, "desktop_share_policy", "diagnostic") != "diagnostic":
+        config["desktop_share_policy"] = args.desktop_share_policy
     validate_config(config)
     preflight(config)
     images = docker_json(config, ["image", "inspect", args.image])
@@ -351,6 +397,7 @@ def configure(args):
     config["image_id"] = image["Id"]
     validate_config(config)
     output = Path(args.output).expanduser()
+    keep_outside_staging(config, output)
     require(not output.exists(), "Refusing to overwrite an existing approved deployment configuration")
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf-8") as handle:
@@ -378,6 +425,9 @@ def main():
     setup.add_argument("--input-dir", required=True)
     setup.add_argument("--context", required=True)
     setup.add_argument("--output", required=True)
+    setup.add_argument("--staging-root", help="Existing private directory for disposable snapshots and diagnostics")
+    setup.add_argument("--desktop-share-policy", choices=("diagnostic", "strict"), default="diagnostic",
+                       help="strict checks saved macOS Desktop virtual shares against staging; it does not verify the live VM")
     setup.add_argument("--profile", choices=sorted(PROFILES), default="standard",
                        help="REA resources: large gives 5 GB, 4 CPUs, a 2 GB /tmp and 29 minutes for Ghidra's first analysis, for binaries above 8 MB")
     for operation in [*MODES, "probe"]:

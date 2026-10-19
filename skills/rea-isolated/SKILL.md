@@ -38,6 +38,13 @@ a compromised host or broker flaws can defeat the boundary.
    selection. Add `--profile large` when a selected file is above 8 MB; runs
    refuse such files on the standard profile. Its `probe`, `version` and `setup-plan` diagnostics mount only an
    empty private temporary directory. Direct `container.py mcp` is retired.
+   On macOS inspect `scripts/desktop_policy.py` and follow the repository's
+   [dedicated staging guide](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/desktop-hardening.md).
+   Propose `--staging-root` and `--desktop-share-policy strict`; keep inputs,
+   control files, logins and outputs outside that shared root. Global Desktop
+   sharing changes or restarts affect other workloads and need explicit owner
+   approval. Saved settings do not prove effective VM isolation; unsupported
+   Desktop hosts remain unknown and cannot satisfy the strict check.
 5. Use `scripts/agent_container.py configure` to select Codex or Claude and pin
    the second image, helpers and input manifest. Review every listed path and
    approved byte. The original input tree is never mounted; only validated,
@@ -96,4 +103,8 @@ State both image IDs, runtime versions, exact mounts, namespace/network settings
 resource bounds, successful MCP calls, rejected host tools, cleanup and actual
 native OS coverage. Separate policy tests, dummy-model checks, real REA analysis
 and paid-provider results. Do not promise zero risk or treat npm audit as a
-malware assessment. On failure stop; never weaken the boundary or execute on host.
+malware assessment. When reviewing image dependencies, use the repository's
+[whole-image audit guide](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/image-audit.md).
+Exit 0 from the scanner means reports were produced; report every severity,
+unfixed finding and coverage limit separately. On failure stop; never weaken
+the boundary or execute on host.

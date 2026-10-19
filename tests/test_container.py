@@ -2,6 +2,7 @@ import csv
 import importlib.util
 from pathlib import Path
 import os
+import sys
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills/rea-isolated/scripts/container.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("rea_container", SCRIPT)
 boundary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundary)

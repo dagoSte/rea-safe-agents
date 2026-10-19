@@ -119,10 +119,10 @@ def archive(root, approved):
         raise
 
 
-def stage(root, approved):
+def stage(root, approved, *, staging_root=None):
     """Private temporary copies only; the original directory is never mounted."""
     frozen = archive(root, approved)
-    temporary = tempfile.TemporaryDirectory(prefix="rea-frozen-input-")
+    temporary = tempfile.TemporaryDirectory(prefix="rea-frozen-input-", dir=staging_root)
     destination = Path(temporary.name) / "input"
     destination.mkdir(mode=0o755)
     try:

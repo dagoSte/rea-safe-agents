@@ -193,9 +193,10 @@ def verify(args):
     # On Windows choose e.g. C:\REA Verification, outside AppData/USERPROFILE.
     with tempfile.TemporaryDirectory(prefix="rea-runtime-test-", dir=scratch) as temporary:
         root = Path(temporary)
-        selected, control = root / "selected", root / "control"
+        selected, control, staging = root / "selected", root / "control", root / "staging"
         selected.mkdir()
         control.mkdir(mode=0o700)
+        staging.mkdir(mode=0o700)
         with zipfile.ZipFile(selected / "inert.zip", "w", compression=zipfile.ZIP_STORED) as archive:
             archive.writestr("fixture-only.txt", PAYLOAD)
         (selected / "native-fixture").write_bytes(native_fixture())
@@ -204,7 +205,8 @@ def verify(args):
             "schema": 1, "docker": str(Path(shutil.which("docker") or "missing-docker").resolve()),
             "docker_config": str(Path(args.docker_config).expanduser().resolve(strict=True)),
             "context": args.context, "image_id": "sha256:" + "0" * 64,
-            "input_dir": str(selected.resolve()),
+            "input_dir": str(selected.resolve()), "staging_root": str(staging.resolve()),
+            "desktop_share_policy": "diagnostic",
         }
         pair.boundary.validate_config(deployment)
         pair.boundary.preflight(deployment)
@@ -244,13 +246,16 @@ def verify(args):
                          "The report did not find the client's final answer")
             pair.require(client == "claude" or (gateway.final_phase == "final_answer" and gateway.final_text_sha256 == pair.answer_sha256(answer[0])),
                          "The provider's final answer was not associated with the exported text")
+            pair.require(not list(staging.iterdir()), "Frozen snapshots or diagnostic inputs remained in staging")
             reports.append({"client": client, "rea_profile": rea["profile"], "client_version": result["client_version"], "passed": True,
                             "completed_rea_calls": policy.calls, "child_sha256": EXPECTED, "native_string_recovered": True,
                             "android_package_and_method_recovered": True,
+                            "dedicated_staging_cleanup": True,
                             "final_answer_extracted": True, "agent_probe": result["agent_probe"], "undeclared_tools_rejected": boundary_report["undeclared_tools_rejected"],
                             "model_requests": result["model_requests"], "real_provider_requests": 0})
         return {"host_os": sys.platform, "host_arch": platform.machine(), "rea_image_id": deployment["image_id"],
-                "agent_image_id": config["agent_image_id"], "clients": reports, "fixture_cleanup": "completed"}
+                "agent_image_id": config["agent_image_id"], "clients": reports, "fixture_cleanup": "completed",
+                "sharing_policy": "diagnostic", "effective_vm_verified": False}
 
 
 def main():

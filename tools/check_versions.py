@@ -39,7 +39,7 @@ NUMBER = r"(?:0|[1-9][0-9]*)"  # canonical ASCII: no leading zeros, no other dig
 SEMVER = NUMBER + r"\." + NUMBER + r"\." + NUMBER
 SYNTAX = {"rea-agents": SEMVER, "claude-code": SEMVER, "codex": SEMVER,
           "ghidra": NUMBER + r"\." + NUMBER + r"(?:\." + NUMBER + r")?", "temurin-jdk-21": r"21(?:\." + NUMBER + r"){1,3}\+" + NUMBER,
-          "node": SEMVER, "node-image": r"sha256:[0-9a-f]{64}"}
+          "node": SEMVER, "node-image": r"sha256:[0-9a-f]{64}", "trivy": SEMVER}
 IMAGE_TAG = re.compile(r"rea-(?:agent-)?local:[A-Za-z0-9._-]+")
 NODE_TAG = "{}-bookworm-slim"
 
@@ -96,6 +96,11 @@ def read_pins(root):
     pins = {"rea-agents": rea["rea-agents"], "claude-code": clients["@anthropic-ai/claude-code"],
             "codex": clients["@openai/codex"], "ghidra": ghidra.group(1),
             "temurin-jdk-21": jdk.group(1) + "+" + jdk.group(2), "node": nodes[0].group(1), "node-image": nodes[0].group(2)}
+    scanner, _ = python_values(root / "tools/scan_images.py")
+    pins["trivy"] = scanner.get("SCANNER_VERSION")
+    if (not isinstance(scanner.get("SCANNER_IMAGE"), str)
+            or not re.fullmatch(r"ghcr\.io/aquasecurity/trivy:" + re.escape(str(pins["trivy"])) + r"@sha256:[0-9a-f]{64}", scanner["SCANNER_IMAGE"])):
+        raise ValueError("Trivy version and digest-pinned scanner image disagree")
     for name, value in pins.items():
         comparable(name, value)  # a pin outside the canonical syntax is an error, not a version
     return pins
@@ -200,6 +205,13 @@ def node_latest(major):
                 if isinstance(item.get("version"), str) and item["version"].startswith("v" + major + "."))
 
 
+def trivy_latest():
+    release = fetch_json("https://api.github.com/repos/aquasecurity/trivy/releases/latest")
+    if release.get("draft") or release.get("prerelease") or not isinstance(release.get("tag_name"), str) or not release["tag_name"].startswith("v"):
+        raise ValueError("Unexpected Trivy release")
+    return release["tag_name"][1:]
+
+
 def node_image_digest(version):
     """The current digest of the pinned tag: a rebuilt image keeps its version."""
     token = fetch_json("https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/node:pull")["token"]
@@ -227,6 +239,7 @@ def latest_versions(pins):
         "temurin-jdk-21": lambda: (temurin_21_latest(), ""),
         "node": lambda: (node_latest(pins["node"].split(".")[0]), ""),
         "node-image": lambda: (node_image_digest(pins["node"]), "current digest of node:" + NODE_TAG.format(pins["node"])),
+        "trivy": lambda: (trivy_latest(), "release version only; scanner tag rebuilds are not checked; review the GHCR digest when updating"),
     }
     results = {}
     for name, source in sources.items():
@@ -316,6 +329,9 @@ def report(root, pins, latest, problems):
               "version also needs a review of its tools, flags and request fields before it is trusted. "
               "A new REA version may audit a different jadx-headless-mcp JAR: match the Dockerfile to its "
               "JADX\\_RELEASE version and SHA-256."]
+    lines += ["", "The Trivy scanner release is monitored. Its digest is pinned and recorded by tools/scan\\_images.py; "
+              "same-version scanner tag rebuilds are outside this automatic check. Review the official GHCR "
+              "digest and scanner release before changing that pin, then rerun the image scan."]
     return rows, behind, "\n".join(lines) + "\n"
 
 

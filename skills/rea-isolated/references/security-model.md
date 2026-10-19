@@ -118,8 +118,21 @@ code can still execute later inside the containers. npm integrity establishes
 consistency with the committed lock, not publisher trust. The dated audit JSON
 reports known npm advisories, not malware or OS image vulnerabilities. OS apt
 packages are not locked, so these builds are not claimed byte-reproducible.
-Independent provenance/attestation verification and an image-wide vulnerability
-scan were not completed. See [npm evidence](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/npm-audit.md).
+Both final images now receive whole-image inventories, vulnerability reports
+and CycloneDX SBOMs from a digest-pinned scanner. Findings remain, including
+unfixed advisories; successful report generation does not mean a clean image.
+Downloaded JDKs and arbitrary native binaries have matching limitations.
+Independent build-provenance/attestation verification remains uncompleted.
+See [npm evidence](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/npm-audit.md)
+and [image-audit scope and triage](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/image-audit.md).
+
+On macOS, Docker Desktop's VM may share broad host directories even though
+the containers retain their restricted mounts. A dedicated `staging_root`
+allows only frozen copies to need sharing. The optional strict policy checks
+the saved virtual-share list before each launch; it refuses unknown or broad
+settings. It does not attest live VM mounts, synchronized shares or alternate
+backends, and does not change Desktop settings. A runtime/VM compromise remains
+a risk. See [the Desktop guide](https://github.com/dagoSte/rea-safe-agents/blob/main/docs/desktop-hardening.md).
 
 ## Compatibility and maintenance
 
