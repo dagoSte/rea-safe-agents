@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT subscriptions on macOS ARM64.
 
+## 2026-10-19 increment: Android apps
+
+JADX through jadx-headless-mcp 0.7.1 (SHA-256 `6e5eacf5…`, the JAR REA 6.7.0
+audited; REA reported its source revision `5844800a` only for this file).
+Native macOS ARM64, standard profile unless stated.
+
+| Check | Result |
+| --- | --- |
+| `rea doctor --provider jadx` under the container limits | Healthy: bridge JAR validated, full JDK 21 with `jdk.compiler` |
+| Generated 1.6 KB APK (binary manifest and one DEX class) | All five queries passed: package `fixture.rea`, version 1.0, SDK 21/34, permission `INTERNET`, and the decompiled `marker()` returning the known string; peak 486 MiB |
+| F-Droid client 2.0.2, 12.5 MB, three DEX files, 11,960 classes | Package summary 9 s, class search 0.7 s, class 0.9 s, references 9.6 s; peak 1,178 MiB and 53 MiB of `/tmp`. A missing method was refused with the list of available ones |
+| `verify_runtime.py`, both clients | Passed: Codex (standard profile) and Claude (large profile) recovered the generated APK's package, permission and decompiled method through the audited bridge |
+| Live Claude subscription analysis with `--template android` | Passed: `claude-opus-5-5` analyzed the F-Droid client in 19 model requests and 39 successful REA calls (17 class searches, 7 decompiled methods, 6 classes, 2 reference traces). The report identified `org.fdroid.fdroid` 2.0.2, mapped each permission to an app-store or nearby-swap feature, found no SMS, contacts, accessibility or device-admin use, rated it low risk and stated that the signature was not verified |
+
 ## 2026-10-19 increment: large binaries
 
 One REA session per binary, through the production controller and container

@@ -288,7 +288,9 @@ def report(root, pins, latest, problems):
               "To update a component: change its pin and checksum or digest, update the reviewed-client "
               "constants and image tags where they appear, rebuild both images, run the unit suite and "
               "tests/verify\\_runtime.py, and record the result in docs/validation.md. A new client "
-              "version also needs a review of its tools, flags and request fields before it is trusted."]
+              "version also needs a review of its tools, flags and request fields before it is trusted. "
+              "A new REA version may audit a different jadx-headless-mcp JAR: match the Dockerfile to its "
+              "JADX\\_RELEASE version and SHA-256."]
     return rows, behind, "\n".join(lines) + "\n"
 
 

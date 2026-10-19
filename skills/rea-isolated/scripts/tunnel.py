@@ -19,8 +19,12 @@ MAX_TOOL_TEXT = 200_000
 NATIVE_TOOLS = {"binary_overview", "list_segments", "inspect_native_load_image", "list_strings", "search_strings",
                 "list_procedures", "search_procedures", "procedure_info", "procedure_pseudo_code", "procedure_assembly",
                 "procedure_callees", "procedure_callers", "xrefs", "list_names", "read_bytes", "analyze_function"}
+# Static APK queries through the pinned JADX bridge. Each names its APK with a
+# path, which the broker confines to the frozen snapshot; the APK never runs.
+ANDROID_TOOLS = {"inspect_android_package", "search_android_classes", "inspect_android_class", "inspect_android_method",
+                 "trace_android_references"}
 STATIC_TOOLS = {"open_binary", "close_binary", "binary_session", "inspect_artifact", "inspect_analysis_view",
-                "analyze_javascript_application"} | NATIVE_TOOLS
+                "analyze_javascript_application"} | NATIVE_TOOLS | ANDROID_TOOLS
 
 
 class ProtocolError(RuntimeError):

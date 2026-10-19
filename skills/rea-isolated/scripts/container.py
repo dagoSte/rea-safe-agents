@@ -40,9 +40,10 @@ PROFILES = {
     "standard": {"memory": MEMORY, "cpus": CPUS, "pids": PIDS, "tmpfs": TMPFS, "env": {}, "tool_timeout": 900},
     "large": {"memory": 5 * 1024**3, "cpus": 4 * 10**9, "pids": 256,
               "tmpfs": {**TMPFS, "/tmp": "rw,nosuid,nodev,noexec,mode=1777,size=2g"},
-              "env": {"GHIDRA_HEADLESS_MAXMEM": "2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS": "1740000"}, "tool_timeout": 1800},
+              "env": {"GHIDRA_HEADLESS_MAXMEM": "2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS": "1740000", "REA_JADX_HEAP_MIB": "2048",
+                      "REA_JADX_ACTIVE_PROCESSOR_COUNT": "4", "REA_JADX_OPERATION_TIMEOUT_MS": "1740000"}, "tool_timeout": 1800},
 }
-LARGE_INPUT = 8 * 1024 * 1024  # files above this size need the large profile
+LARGE_INPUT = 8 * 1024 * 1024  # native files above this size need the large profile
 MODES = {
     "mcp": ["mcp"],
     "version": ["--version"],

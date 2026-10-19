@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="title desc">
   <title id="title">How REA Safe Agent works</title>
-  <desc id="desc">Your files enter the REA container only as frozen, hash-approved copies. REA with Ghidra runs in one container and Codex or Claude Code in a second one; both have no network. A trusted controller on your computer relays only 22 approved tools between them, bounds every result, and sends model requests over one fixed HTTPS route using your own Claude or ChatGPT subscription. The report is saved privately. Analysis is static; the file never runs.</desc>
+  <desc id="desc">Your files enter the REA container only as frozen, hash-approved copies. REA with Ghidra and JADX runs in one container and Codex or Claude Code in a second one; both have no network. A trusted controller on your computer relays only 27 approved tools between them, bounds every result, and sends model requests over one fixed HTTPS route using your own Claude or ChatGPT subscription. The report is saved privately. Analysis is static; the file never runs.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#93A1B3"/>
@@ -49,9 +49,10 @@
   <rect x="246" y="150" width="216" height="46" rx="18" fill="#0A8CFA"/>
   <rect x="246" y="176" width="216" height="20" fill="#0A8CFA"/>
   <text x="264" y="180" class="head">① REA container</text>
-  <text x="264" y="232" class="item">REA 6.7.0 + Ghidra 12.1.4</text>
-  <text x="264" y="262" class="item">reads only frozen</text>
-  <text x="264" y="282" class="item">copies at /input</text>
+  <text x="264" y="226" class="item">REA 6.7.0 + Ghidra 12.1.4</text>
+  <text x="264" y="246" class="item">+ JADX for Android apps</text>
+  <text x="264" y="272" class="item">reads only frozen</text>
+  <text x="264" y="292" class="item">copies at /input</text>
   <text x="264" y="318" class="item">✓ network: none</text>
   <text x="264" y="344" class="item">✓ read-only root</text>
   <text x="264" y="370" class="item">✓ no capabilities</text>
@@ -63,7 +64,7 @@
   <rect x="496" y="190" width="176" height="294" rx="18" fill="#0E1622" stroke="#38C0F8" stroke-width="3"/>
   <text x="584" y="226" class="head" text-anchor="middle">Gateway</text>
   <text x="584" y="248" class="sub" text-anchor="middle" style="font-size:13px">trusted controller</text>
-  <text x="514" y="290" class="item">22 approved tools</text>
+  <text x="514" y="290" class="item">27 approved tools</text>
   <text x="514" y="314" class="item">everything else</text>
   <text x="514" y="334" class="item">is refused</text>
   <text x="514" y="370" class="item">results ≤ 200 KB</text>

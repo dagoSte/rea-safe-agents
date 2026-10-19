@@ -9,8 +9,8 @@ reviewed profile library for the contained worker and regression tests.
 
 | Client | Linux version pinned in the agent image | Effective actionable tools |
 | --- | --- | --- |
-| Codex | CLI 0.163.0 | The 22 `mcp__rea` tools; passive MCP resource/question helpers may also appear |
-| Claude Code | 2.1.302 | The same 22 `mcp__rea__*` tools in initialization and model requests |
+| Codex | CLI 0.163.0 | The 27 `mcp__rea` tools; passive MCP resource/question helpers may also appear |
+| Claude Code | 2.1.302 | The same 27 `mcp__rea__*` tools in initialization and model requests |
 
 The REA tools are `open_binary`, `binary_session`, `inspect_artifact`,
 `inspect_analysis_view`, `analyze_javascript_application` and `close_binary`,
@@ -18,7 +18,10 @@ plus 16 read-only Ghidra queries of the open target: `binary_overview`,
 `list_segments`, `inspect_native_load_image`, `list_strings`, `search_strings`,
 `list_procedures`, `search_procedures`, `procedure_info`, `procedure_pseudo_code`,
 `procedure_assembly`, `procedure_callees`, `procedure_callers`, `xrefs`,
-`list_names`, `read_bytes` and `analyze_function`. Annotation tools and all other
+`list_names`, `read_bytes` and `analyze_function`, and 5 static JADX queries of
+an APK: `inspect_android_package`, `search_android_classes`,
+`inspect_android_class`, `inspect_android_method` and
+`trace_android_references`. Annotation tools and all other
 upstream tools are hidden and calls to them are rejected. Catalog
 filtering alone is not the authorization check. Reverse server requests and
 resource/prompt methods are blocked by the broker; optional `server/discover`

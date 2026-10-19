@@ -661,7 +661,7 @@ class TemplateTests(unittest.TestCase):
         return SimpleNamespace(**{"prompt_file": None, "template": None, "target": None, **values})
 
     def test_templates_list_the_selected_files_one_per_line(self):
-        self.assertEqual(pair.templates(), ["archive", "executable", "javascript", "triage"])
+        self.assertEqual(pair.templates(), ["android", "archive", "executable", "javascript", "triage"])
         for name in pair.templates():
             with self.subTest(template=name):
                 prompt, targets = pair.build_prompt(self.args(template=name), self.CONFIG)
@@ -705,7 +705,8 @@ class TemplateTests(unittest.TestCase):
 
 
 class LargeProfileTests(unittest.TestCase):
-    INPUTS = [{"path": "libbig.so", "size": pair.boundary.LARGE_INPUT + 1}, {"path": "small.bin", "size": pair.boundary.LARGE_INPUT}]
+    INPUTS = [{"path": "libbig.so", "size": pair.boundary.LARGE_INPUT + 1}, {"path": "small.bin", "size": pair.boundary.LARGE_INPUT},
+              {"path": "dir/Big.APK", "size": 64 * pair.boundary.LARGE_INPUT}]
 
     def run_with(self, rea, target):
         class Login:
@@ -759,6 +760,12 @@ class LargeProfileTests(unittest.TestCase):
         # The large profile leaves headroom over the 830 s measured for a 25 MB library.
         self.assertGreaterEqual(int(pair.boundary.PROFILES["large"]["env"]["REA_GHIDRA_STARTUP_TIMEOUT_MS"]), 2 * 830_000)
 
+    def test_apks_are_read_by_jadx_and_keep_the_standard_profile(self):
+        prompt, profile = self.run_with({}, "dir/Big.APK")
+        self.assertNotIn(pair.LARGE_GUIDANCE, prompt)
+        self.assertEqual(profile, "standard")
+        self.assertEqual(pair.large_targets(self.INPUTS, ["dir/Big.APK", "libbig.so"]), ["libbig.so"])
+
     def test_files_up_to_the_threshold_keep_the_standard_profile_and_prompt(self):
         for rea in ({}, {"profile": "large"}):
             with self.subTest(rea=rea):
@@ -782,6 +789,7 @@ class LargeProfileTests(unittest.TestCase):
                                                             output=str(root / "pair" / "codex.json")))
                 self.assertEqual(result["rea_profile"], rea.get("profile", "standard"))
                 self.assertEqual("libbig.so" in result.get("recommendation", ""), advised)
+                self.assertNotIn("Big.APK", result.get("recommendation", ""))
 
 
 class MCPPolicyTests(unittest.TestCase):
@@ -855,6 +863,29 @@ class MCPPolicyTests(unittest.TestCase):
             request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
             with self.subTest(name=name):
                 self.assertIsNotNone(pair.MCPPolicy().request(json.dumps(request).encode()))
+
+    def test_android_queries_name_only_an_apk_in_the_frozen_snapshot(self):
+        apk = "/input/app.apk"
+        admitted = (("inspect_android_package", {"path": apk, "detail": "summary"}), ("search_android_classes", {"path": apk, "query": ""}),
+                    ("inspect_android_class", {"path": apk, "class_name": "a.B"}),
+                    ("inspect_android_method", {"path": apk, "class_name": "a.B", "method_name": "c", "overload_index": 1}),
+                    ("trace_android_references", {"path": apk, "class_name": "a.B", "method_name": "c"}))
+        self.assertEqual({name for name, _ in admitted}, tunnel.ANDROID_TOOLS)
+        for name, arguments in admitted:
+            request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+            with self.subTest(name=name):
+                self.assertIsNotNone(pair.MCPPolicy().request(json.dumps(request).encode()))
+        refused = ({"path": "/sdcard/app.apk"}, {"path": "/input/../home/node/x.apk"}, {"path": "/input/a\\b.apk"}, {"path": "/input/a\nb"},
+                   {}, {"path": 7}, {"path": apk, "output_path": "/tmp/out"}, {"path": apk, "workspacePath": "/tmp"})
+        for arguments in refused:
+            for name in sorted(tunnel.ANDROID_TOOLS):
+                request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+                with self.subTest(name=name, arguments=arguments), self.assertRaises(tunnel.ProtocolError):
+                    pair.MCPPolicy().request(json.dumps(request).encode())
+        for name in ("decode_android_resources", "inspect_apktool_client", "project_android_application_graph", "inspect_jeb_client"):
+            request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {"path": apk}}}
+            with self.subTest(outside=name), self.assertRaises(tunnel.ProtocolError):
+                pair.MCPPolicy().request(json.dumps(request).encode())
 
     def test_unadvertised_tools_and_host_callbacks_are_refused(self):
         for method, params in (("tools/call", {"name": "gdb_console", "arguments": {}}),

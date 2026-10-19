@@ -39,7 +39,7 @@ does not prove that the bytes chosen during configuration are nonsensitive.
 | Risk | Implemented control | Remaining limit |
 | --- | --- | --- |
 | Sensitive host data exposure | No home/credential/socket mounts; only frozen approved file bytes enter REA; no input mount enters the agent | Selected bytes can return through MCP/model data; private logs and deliberate exports can disclose them |
-| Malicious instructions cause host actions | Separate contained agent, removed host tools, 22 allowlisted MCP tools enforced on calls, reverse callbacks blocked | Results may mislead analysis; moving them into a privileged agent changes the trust boundary |
+| Malicious instructions cause host actions | Separate contained agent, removed host tools, 27 allowlisted MCP tools enforced on calls, reverse callbacks blocked | Results may mislead analysis; moving them into a privileged agent changes the trust boundary |
 | Compromised npm/REA or agent code escapes restrictions | Separate non-root containers, no network/socket/capabilities, inspected settings, readonly roots and bounded resources | Unknown Docker/kernel/hypervisor defects and compromised trusted host software can defeat isolation |
 
 A compromised package cannot simply call the host shell or read arbitrary host
@@ -51,9 +51,10 @@ for higher-assurance deployments; no extra VM is installed by this project.
 
 ## Trusted protocol broker
 
-The broker accepts only the approved MCP lifecycle and 22 static-analysis
+The broker accepts only the approved MCP lifecycle and 27 static-analysis
 tools. It checks actual calls, target paths and close arguments; only the target
-tools open a path, `open_binary` accepts only the Ghidra provider, and snapshot
+tools (`open_binary`, `analyze_javascript_application` and the five Android
+queries) name a path, always a file in the frozen `/input` snapshot, `open_binary` accepts only the Ghidra provider, and snapshot
 import/export is refused. Each result is relayed
 as one text copy of at most 200,000 bytes, cut visibly in the middle when larger.
 Initialization
@@ -94,7 +95,10 @@ or the Docker socket. The official Node image index and direct package versions
 are pinned; both images use committed transitive integrity locks and
 `npm ci --ignore-scripts`. REA omits optional npm providers; client native
 packages are linked without running their postinstall hooks. The REA image adds
-Ghidra 12.1.4 and Temurin JDK 21.0.12.1, each verified against a pinned SHA-256.
+Ghidra 12.1.4, Temurin JDK 21.0.12.1 and the jadx-headless-mcp 0.7.1 JAR (the
+JADX bridge REA audited, Apache-2.0), each verified against a pinned SHA-256.
+JADX parses an untrusted APK inside the same container, limits and network
+denial; a parser defect there is contained like one in Ghidra.
 On arm64 the decompiler and GNU demangler are compiled from that same verified
 archive, because the release ships x86_64 natives only. Ghidra runs inside the
 REA container under the same limits, with a 1 GiB heap (2 GiB on the large

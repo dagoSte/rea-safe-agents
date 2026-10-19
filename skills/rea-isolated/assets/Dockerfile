@@ -1,6 +1,8 @@
 FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS base
 
 # Ghidra 12.1.4 is REA 6.7.0's verified native provider; it needs a full JDK 21.
+# jadx-headless-mcp 0.7.1 is its audited Android provider (JADX_RELEASE in the
+# REA package: tag v0.7.1, commit 5844800a, Apache-2.0); it runs on that JDK.
 # Every download is pinned by SHA-256 and fetched only during this reviewed build.
 FROM base AS ghidra
 ARG TARGETARCH
@@ -22,6 +24,10 @@ RUN case "$TARGETARCH" in \
     && mkdir /opt/jdk \
     && tar -xzf /tmp/jdk.tar.gz -C /opt/jdk --strip-components=1 \
     && rm /tmp/jdk.tar.gz
+RUN mkdir /opt/jadx \
+    && curl -fsSLo /opt/jadx/jadx-headless-mcp-0.7.1-all.jar https://github.com/1013503897/jadx-headless-mcp/releases/download/v0.7.1/jadx-headless-mcp-0.7.1-all.jar \
+    && echo "6e5eacf500b64292bfb73c49797c1958f6ee44646e43e868039ae7feb573ff75  /opt/jadx/jadx-headless-mcp-0.7.1-all.jar" | sha256sum -c - \
+    && chmod 0444 /opt/jadx/jadx-headless-mcp-0.7.1-all.jar
 # The release ships x86_64 natives only. On arm64, build the decompiler and the
 # GNU demangler from the sources inside the same verified release archive.
 RUN if [ "$TARGETARCH" = arm64 ]; then \
@@ -42,11 +48,15 @@ RUN apt-get update \
 
 COPY --from=ghidra /opt/jdk /opt/jdk
 COPY --from=ghidra /opt/ghidra /opt/ghidra
+COPY --from=ghidra /opt/jadx /opt/jadx
 # The launcher refuses runtime environment injection, so the provider settings
-# are part of the pinned image. The heap leaves room inside the 2 GiB limit.
+# are part of the pinned image. The heaps leave room inside the 2 GiB limit.
 ENV JAVA_HOME=/opt/jdk \
     GHIDRA_INSTALL_DIR=/opt/ghidra \
-    GHIDRA_HEADLESS_MAXMEM=1G
+    GHIDRA_HEADLESS_MAXMEM=1G \
+    REA_JADX_MCP_JAR=/opt/jadx/jadx-headless-mcp-0.7.1-all.jar \
+    REA_JADX_HEAP_MIB=512 \
+    REA_JADX_ACTIVE_PROCESSOR_COUNT=2
 
 COPY package.json package-lock.json /opt/rea/
 RUN cd /opt/rea \

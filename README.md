@@ -100,7 +100,7 @@ execution fallback or global MCP registration.
 
 ## At a glance
 
-![How REA Safe Agent works: your files enter the REA container only as frozen, hash-approved copies; REA with Ghidra and the coding agent run in two containers without network; a trusted gateway relays only 22 approved tools and sends model requests over one fixed route with your own subscription; the report is saved privately](media/how-it-works.svg)
+![How REA Safe Agent works: your files enter the REA container only as frozen, hash-approved copies; REA with Ghidra and JADX and the coding agent run in two containers without network; a trusted gateway relays only 27 approved tools and sends model requests over one fixed route with your own subscription; the report is saved privately](media/how-it-works.svg)
 
 ## When it helps
 
@@ -248,7 +248,7 @@ required by this implementation. See the [security model](skills/rea-isolated/re
 
 ## Available analysis tools
 
-REA 6.7.0 advertises 207 tools. This profile exposes 22 of them and enforces
+REA 6.7.0 advertises 207 tools. This profile exposes 27 of them and enforces
 the same allowlist on calls.
 
 | Tool | Purpose |
@@ -267,8 +267,18 @@ network. These 16 read-only queries of the open target are exposed:
 `search_strings`, `list_procedures`, `search_procedures`, `procedure_info`,
 `procedure_pseudo_code`, `procedure_assembly`, `procedure_callees`,
 `procedure_callers`, `xrefs`, `list_names`, `read_bytes` and `analyze_function`.
-None accepts a filesystem path. Annotation tools, snapshot import/export, other
-providers (IDA, Hopper, JADX and others) and debuggers stay outside the profile.
+None accepts a filesystem path.
+
+Android apps (APK) are analyzed by **JADX**, through jadx-headless-mcp 0.7.1,
+the bridge REA audited, pinned by SHA-256 and run on the same JDK. The APK is
+read statically and never installed or run. These 5 queries are exposed:
+`inspect_android_package` (package, version, SDK levels, permissions and the
+decoded manifest), `search_android_classes`, `inspect_android_class`,
+`inspect_android_method` (decompiled Java, with smali as fallback) and
+`trace_android_references`. Each names its APK by path, and the broker accepts
+only a file in the frozen `/input` snapshot. Resource decoding (apktool), JEB,
+devices (adb, Frida) and other providers (IDA, Hopper and others), annotation
+tools, snapshot import/export and debuggers stay outside the profile.
 
 Each tool result reaches the model as one text copy of at most 200,000 bytes.
 Larger results are cut in the middle with an explicit note asking for a
@@ -452,6 +462,23 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 
 Improvements since the first public release, newest first.
 
+### Android apps
+
+APKs are now analyzed by JADX inside the REA container, through
+jadx-headless-mcp 0.7.1: the bridge REA 6.7.0 audited (commit `5844800a`,
+Apache-2.0), downloaded during the image build and checked against its
+SHA-256. Five static queries cover the package and its permissions, class
+search, class members, decompiled methods and references; the broker accepts
+only an APK path in the frozen `/input` snapshot. The new `android` template
+asks for permissions, components, endpoints, risky capabilities, obfuscation
+and a risk assessment. On the standard profile the 12.5 MB F-Droid client
+(three DEX files) took 9 seconds for its package summary and under a second
+for most other queries, peaking at 1.2 GiB. APKs are therefore exempt from the
+8 MB rule for native files; the large profile gives JADX a 2 GiB heap for apps
+that need more. The runtime check generates a small APK and requires both
+clients to recover its package, permission and a decompiled method through the
+audited bridge.
+
 ### Large binaries
 
 `container.py configure --profile large` gives REA 5 GB of memory, 4 CPUs, 256
@@ -470,8 +497,8 @@ the large profile, so Docker's handling of these limits is verified as well.
 
 ### Ready prompts and several files per session
 
-`run --template` replaces a hand-written prompt with one of four reviewed
-prompts: `triage`, `executable`, `javascript` and `archive`, kept in
+`run --template` replaces a hand-written prompt with one of the reviewed
+prompts: `triage`, `executable`, `javascript`, `archive` and `android`, kept in
 [`skills/rea-isolated/prompts`](skills/rea-isolated/prompts). Each tells the
 model to treat everything inside the files as data, to open and close one
 file at a time and to say what REA could not determine. A session can now

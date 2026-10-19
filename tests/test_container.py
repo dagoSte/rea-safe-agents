@@ -72,14 +72,16 @@ class ContainerPolicyTests(unittest.TestCase):
                 boundary.validate_config({**self.config, "profile": profile})
         args = boundary.create_args(large, "mcp")
         for expected in ("--memory=5120m", "--memory-swap=5120m", "--cpus=4", "--pids-limit=256",
-                         "--env=GHIDRA_HEADLESS_MAXMEM=2G", "--env=REA_GHIDRA_STARTUP_TIMEOUT_MS=1740000"):
+                         "--env=GHIDRA_HEADLESS_MAXMEM=2G", "--env=REA_GHIDRA_STARTUP_TIMEOUT_MS=1740000",
+                         "--env=REA_JADX_HEAP_MIB=2048", "--env=REA_JADX_ACTIVE_PROCESSOR_COUNT=4",
+                         "--env=REA_JADX_OPERATION_TIMEOUT_MS=1740000"):
             self.assertIn(expected, args)
         self.assertIn("/tmp:rw,nosuid,nodev,noexec,mode=1777,size=2g", args)
         standard = boundary.create_args(self.config, "mcp")
         self.assertIn("--memory=2048m", standard)
         self.assertFalse(any(arg.startswith("--env=") and arg != "--env=HOME=/home/node" for arg in standard))
         data = approved(large)
-        data["Config"]["Env"] += ["GHIDRA_HEADLESS_MAXMEM=2G", "REA_GHIDRA_STARTUP_TIMEOUT_MS=1740000"]
+        data["Config"]["Env"] += [key + "=" + value for key, value in boundary.PROFILES["large"]["env"].items()]
         data["HostConfig"].update(Memory=5 * 1024**3, MemorySwap=5 * 1024**3, NanoCpus=4 * 10**9, PidsLimit=256,
                                   Tmpfs=dict(boundary.PROFILES["large"]["tmpfs"]))
         self.assertEqual(boundary.verify_container(large, data, "mcp", ENV)["profile"], "large")
@@ -88,6 +90,14 @@ class ContainerPolicyTests(unittest.TestCase):
             boundary.verify_container(self.config, data, "mcp", ENV)
         with self.assertRaises(boundary.BoundaryError):
             boundary.verify_container(large, approved(self.config), "mcp", ENV)
+        # A profile value replaces the image's own (the image sets a 512 MiB JADX heap); a second copy is refused.
+        image = [*ENV, "REA_JADX_HEAP_MIB=512"]
+        self.assertEqual(boundary.verify_container(large, data, "mcp", image)["profile"], "large")
+        doubled = approved(large)
+        doubled["Config"]["Env"] = [*data["Config"]["Env"], "REA_JADX_HEAP_MIB=512"]
+        doubled["HostConfig"] = data["HostConfig"]
+        with self.assertRaises(boundary.BoundaryError):
+            boundary.verify_container(large, doubled, "mcp", image)
         for key, value in (("Memory", 6 * 1024**3), ("NanoCpus", 8 * 10**9), ("PidsLimit", 512)):
             changed = approved(large)
             changed["Config"]["Env"] = data["Config"]["Env"]

@@ -29,12 +29,14 @@ import container as boundary
 import input_snapshot
 from offline_model import OfflineHandler
 from model_policy import validate_body
-from tunnel import MAX_BODY, MAX_RESPONSE, MAX_TOOL_TEXT, MAX_TRANSCRIPT, STATIC_TOOLS, ProtocolError, Wire, decode_json, digest, pack, read_frame, require, unpack
+from tunnel import ANDROID_TOOLS, MAX_BODY, MAX_RESPONSE, MAX_TOOL_TEXT, MAX_TRANSCRIPT, STATIC_TOOLS, ProtocolError, Wire, decode_json, digest, pack, read_frame, require, unpack
 
 HERE = Path(__file__).resolve()
 HELPERS = ("agent_container.py", "agent_worker.py", "agent_session.py", "container.py", "input_snapshot.py", "model_policy.py", "offline_model.py", "tunnel.py", "probe.js")
 WORKER_FILES = ("agent_worker.py", "agent_session.py", "tunnel.py")
 TOOLS = STATIC_TOOLS
+# The one argument through which a tool names a file; it must be in /input.
+TARGET_KEYS = {"open_binary": "path", "analyze_javascript_application": "input_path", **{name: "path" for name in ANDROID_TOOLS}}
 PROBE_KEYS = {"non_root", "no_new_privileges", "no_effective_capabilities", "seccomp_filter_active",
               "no_active_non_loopback_interface", "no_docker_cli", "no_docker_socket", "no_host_input_mount",
               "no_model_credentials", "root_write_denied", "outbound_connection_denied"}
@@ -369,10 +371,9 @@ class MCPPolicy:
             if name == "open_binary":
                 require("snapshot_path" not in args, "Snapshot imports are outside the paired profile")
                 require(args.get("provider_id", "auto") in {"auto", "ghidra"}, "Only the Ghidra provider is in the paired profile")
-            elif name != "analyze_javascript_application":
-                require(not any("path" in key.lower() for key in args), "Only the target tools accept filesystem paths")
-            if name in {"open_binary", "analyze_javascript_application"}:
-                key = "path" if name == "open_binary" else "input_path"
+            key = TARGET_KEYS.get(name)
+            require(not any("path" in other.lower() for other in args if other != key), "Only the target tools accept filesystem paths")
+            if key:
                 path = args.get(key)
                 require(isinstance(path, str) and path.startswith("/input/") and ".." not in path.split("/")
                         and "\\" not in path and not any(c in path for c in "\x00\r\n"), "Targets must use the frozen /input snapshot")
@@ -886,9 +887,13 @@ LARGE_GUIDANCE = ("These files are large. The first Ghidra analysis of each one 
 
 
 def large_targets(inputs, targets):
-    """Targets above the size the standard REA profile can analyze."""
+    """Targets above the size the standard profile's Ghidra can analyze.
+
+    APKs are exempt: JADX reads them with its own heap, and a 12.5 MB APK
+    peaked at 1.2 GiB on the standard profile.
+    """
     sizes = {item["path"]: item["size"] for item in inputs}
-    return [target for target in targets if sizes[target] > boundary.LARGE_INPUT]
+    return [target for target in targets if sizes[target] > boundary.LARGE_INPUT and not target.lower().endswith(".apk")]
 
 
 def run(args):

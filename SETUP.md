@@ -182,7 +182,7 @@ contained Codex never receives it. Requests go to
 with a ChatGPT login. It is not a documented public API and may change.
 
 Instead of `--prompt-file`, `--template triage` (or `executable`, `javascript`,
-`archive`) uses a ready prompt over every selected file; `--target NAME`
+`archive`, `android`) uses a ready prompt over every selected file; `--target NAME`
 limits it to some of them.
 
 The agent's final answer is saved as `report.md` in the output directory,
