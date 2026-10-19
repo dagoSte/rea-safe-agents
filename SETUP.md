@@ -174,6 +174,10 @@ contained Codex never receives it. Requests go to
 `chatgpt.com/backend-api/codex/responses`, the endpoint the Codex CLI itself uses
 with a ChatGPT login. It is not a documented public API and may change.
 
+Instead of `--prompt-file`, `--template triage` (or `executable`, `javascript`,
+`archive`) uses a ready prompt over every selected file; `--target NAME`
+limits it to some of them.
+
 The agent's final report is saved as `report.md` in the output directory;
 `agent_container.py report --output DIRECTORY` prints it again. Treat it as
 untrusted text.

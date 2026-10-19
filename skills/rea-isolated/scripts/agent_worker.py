@@ -159,8 +159,8 @@ class Gateway(http.server.BaseHTTPRequestHandler):
 
 def run():
     start = read_frame(sys.stdin.buffer)
-    require(start is not None and set(start) == {"type", "client", "prompt", "login"} and start["type"] == "start", "Invalid worker start")
-    client, prompt, login = start["client"], start["prompt"], start["login"]
+    require(start is not None and set(start) == {"type", "client", "prompt", "login", "turns"} and start["type"] == "start", "Invalid worker start")
+    client, prompt, login, turns = start["client"], start["prompt"], start["login"], start["turns"]
     require(client in profile.REVIEWED and isinstance(prompt, str) and 0 < len(prompt.encode()) <= 128 * 1024, "Invalid client or prompt")
     # Claude receives the user's own login in its process environment only;
     # Codex never holds one, because the host gateway authenticates it.
@@ -232,7 +232,7 @@ def run():
     session = {"client": client, "executable": executable}
     argv, env = profile.command(root, session, [sys.executable, str(HERE), "mcp-relay"],
                                 mock_url="http://127.0.0.1:" + str(server.server_port),
-                                prompt="Analysis task:\n" + prompt, login=login)
+                                prompt="Analysis task:\n" + prompt, login=login, max_turns=turns)
     if client == "codex":
         config_path = Path(env["CODEX_HOME"]) / "config.toml"
         # Pre-approve only the contained static tools admitted by the separate

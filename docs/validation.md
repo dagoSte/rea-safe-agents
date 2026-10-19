@@ -19,6 +19,7 @@ which passed all four jobs. The matrix in the last section describes the previou
 | Real analysis with an outside agent as the model | Passed for Claude Code: decompiled `main` and `fnv1a32` of a compiled x86-64 ELF and decoded its XOR-0x5a string from REA output alone |
 | Public CI, this release | All four jobs passed: Linux, macOS and Windows policy suites, and Linux AMD64 runtime with both real clients; Ghidra recovered the known ELF string |
 | Live Claude subscription analysis, native macOS ARM64 | Passed: `claude-opus-5-5` through the owner's `claude setup-token` login, 7 model requests and 11 successful REA calls; the report matched the known source (see below) |
+| Live two-file `triage` template with Claude, native macOS ARM64 | Passed: `claude-opus-5-5` analyzed an archive and an ELF one at a time (12 successful REA calls, 9 model requests) and wrote `report.md` with a risk level per file and a summary; it reported that REA lists archive entries but cannot read the script inside |
 | Live Codex analysis with a ChatGPT login, native macOS ARM64 | Passed: `gpt-6.1-sol` through a dedicated `codex-login` device login, 5 model requests and 9 successful REA calls; the report matched the known source. The first live attempts found that `gpt-5.5` is not offered to ChatGPT accounts and that real responses carry two fields the profile then lacked (`phase`, `logprobs`); both are now admitted as bounded data |
 
 An independent three-reviewer audit of the release (commit `4ee3dc0`) confirmed

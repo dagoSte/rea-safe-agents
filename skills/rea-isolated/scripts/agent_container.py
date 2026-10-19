@@ -40,7 +40,10 @@ PROBE_KEYS = {"non_root", "no_new_privileges", "no_effective_capabilities", "sec
 AGENT_TMPFS = {"/tmp": "rw,nosuid,nodev,noexec,mode=1777,size=256m",
                "/home/node": "rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=0700,size=256m"}
 AGENT_ENTRY = ["python3", "/opt/rea-sandbox/agent_worker.py"]
-MAX_REQUESTS = 32
+MAX_REQUESTS = 32  # model requests for one target; more targets raise it up to MAX_REQUESTS_CAP
+EXTRA_REQUESTS, MAX_REQUESTS_CAP = 24, 128
+SESSION_TIMEOUT, EXTRA_TIMEOUT, MAX_TIMEOUT = 1800, 900, 5400
+PROMPTS = HERE.parents[1] / "prompts"
 MAX_OUTPUT_TOKENS = 32000
 # One streamed model answer: long enough for MAX_OUTPUT_TOKENS, still inside the session budget.
 RESPONSE_TIMEOUT = 900
@@ -552,8 +555,10 @@ class CodexLogin:
 
 
 class ModelGateway:
-    def __init__(self, client, *, model=None, fixture_port=None, login=None):
+    def __init__(self, client, *, model=None, fixture_port=None, login=None, max_requests=MAX_REQUESTS):
         self.client, self.model, self.fixture_port, self.login, self.requests = client, model, fixture_port, login, 0
+        require(type(max_requests) is int and 0 < max_requests <= MAX_REQUESTS_CAP, "Invalid model request budget")
+        self.max_requests = max_requests
         self.catalogs = []
         self.session = str(uuid.uuid4())
         if client == "claude":
@@ -567,9 +572,9 @@ class ModelGateway:
     def exchange(self, frame, wire):
         deadline = min(getattr(self, "deadline", float("inf")), time.monotonic() + RESPONSE_TIMEOUT)
         require(set(frame) == {"type", "id", "path", "beta", "auth", "body"} and frame["type"] == "model"
-                and type(frame["id"]) is int and 0 < frame["id"] <= MAX_REQUESTS, "Invalid model envelope")
+                and type(frame["id"]) is int and 0 < frame["id"] <= self.max_requests, "Invalid model envelope")
         self.requests += 1
-        require(self.requests <= MAX_REQUESTS, "Model request budget exceeded")
+        require(self.requests <= self.max_requests, "Model request budget exceeded")
         parsed = urlsplit(frame["path"])
         endpoints = {"/v1/responses"} if self.client == "codex" else {"/v1/messages", "/v1/messages/count_tokens"}
         require(not parsed.scheme and not parsed.netloc and not parsed.fragment and parsed.path in endpoints
@@ -671,7 +676,7 @@ def fixture(client, *, steps=None, test_refusals=True):
         thread.join(timeout=2)
 
 
-def exercise(config, rea, *, prompt, gateway, timeout, login=None, diagnostics=None):
+def exercise(config, rea, *, prompt, gateway, timeout, login=None, turns=20, diagnostics=None):
     boundary.preflight(rea)
     temporary, snapshot = input_snapshot.stage(rea["input_dir"], config["inputs"])
     managed = Containers(rea)
@@ -713,7 +718,7 @@ def exercise(config, rea, *, prompt, gateway, timeout, login=None, diagnostics=N
         for target, process in ((read_agent, agent_process), (read_rea, rea_process),
                                 (drain_errors, agent_process), (drain_errors, rea_process)):
             threading.Thread(target=target, args=(process,), daemon=True).start()
-        wire.send({"type": "start", "client": config["client"], "prompt": prompt, "login": login})
+        wire.send({"type": "start", "client": config["client"], "prompt": prompt, "login": login, "turns": turns})
         deadline, frames = time.monotonic() + timeout, 0
         gateway.deadline = deadline
         while done is None:
@@ -812,12 +817,40 @@ def verify(args):
     return result
 
 
+def templates():
+    return sorted(path.stem for path in PROMPTS.glob("*.md"))
+
+
+def build_prompt(args, config):
+    """The analysis prompt and its targets: a prompt file, or a template over selected files."""
+    selected = [item["path"] for item in config["inputs"]]
+    targets = list(dict.fromkeys(args.target or selected))
+    require(bool(targets) and all(target in selected for target in targets),
+            "Targets must be files selected for this configuration: " + ", ".join(selected))
+    require((args.prompt_file is None) != (args.template is None), "Give either --prompt-file or --template")
+    if args.prompt_file:
+        prompt = Path(args.prompt_file).read_text(encoding="utf-8")
+    else:
+        require(args.template in templates(), "Unknown template; available: " + ", ".join(templates()))
+        listing = "\n".join("- /input/" + target for target in targets)
+        prompt = (PROMPTS / (args.template + ".md")).read_text(encoding="utf-8").replace("{targets}", listing)
+    require(bool(prompt.strip()) and len(prompt.encode()) <= 128 * 1024, "Provide a bounded analysis prompt")
+    return prompt, targets
+
+
+def budgets(targets):
+    """Each extra file gets more model requests, Claude turns and time, within fixed caps."""
+    extra = len(targets) - 1
+    return (min(MAX_REQUESTS + EXTRA_REQUESTS * extra, MAX_REQUESTS_CAP), min(20 + 15 * extra, 80),
+            min(SESSION_TIMEOUT + EXTRA_TIMEOUT * extra, MAX_TIMEOUT))
+
+
 def run(args):
     path, config, rea = load_config(args.config)
     report = decode_json(receipt_path(path).read_bytes())
     require(report.get("status") == "verified-contained-offline" and report.get("identity") == identity(path, config), "A matching native paired verification is required")
-    prompt = Path(args.prompt_file).read_text(encoding="utf-8")
-    require(bool(prompt.strip()) and len(prompt.encode()) <= 128 * 1024, "Provide a bounded analysis prompt")
+    prompt, targets = build_prompt(args, config)
+    requests, turns, timeout = budgets(targets)
     output = private_output(args.output)
     require(not output.exists(), "Use a new private output directory for every fresh contained session")
     if config["client"] == "claude":
@@ -831,18 +864,20 @@ def run(args):
         require(bool(args.codex_login), "Create a dedicated ChatGPT login with codex-login and pass it as --codex-login")
         login, account = None, CodexLogin(args.codex_login)
     with account as credential:
-        gateway = ModelGateway(config["client"], model=args.model, login=credential)
+        gateway = ModelGateway(config["client"], model=args.model, login=credential, max_requests=requests)
         output.mkdir(mode=0o700, parents=True)
-        profile.write_json(output / "started.json", {"identity": identity(path, config), "model": args.model})
+        profile.write_json(output / "started.json", {"identity": identity(path, config), "model": args.model, "targets": targets,
+                                                     "template": args.template, "max_requests": requests, "max_turns": turns, "timeout": timeout})
         # A failed run still leaves its transcripts in the private output directory.
-        result, transcripts = exercise(config, rea, prompt=prompt, gateway=gateway, timeout=1800, login=login,
+        result, transcripts = exercise(config, rea, prompt=prompt, gateway=gateway, timeout=timeout, login=login, turns=turns,
                                        diagnostics=output / "failed")
     for channel, data in transcripts.items():
         target = output / ("agent." + channel + ".jsonl")
         target.write_bytes(data)
         if os.name != "nt":
             target.chmod(0o600)
-    result.update(status="completed-contained-analysis", model=args.model, output_directory=str(output))
+    result.update(status="completed-contained-analysis", model=args.model, output_directory=str(output), targets=targets,
+                  template=args.template)
     try:
         result["report_file"] = str(write_report(output, result))
     except ProtocolError:
@@ -989,7 +1024,9 @@ def main():
         p.add_argument("--config", required=True)
         if operation == "run":
             p.add_argument("--model", required=True)
-            p.add_argument("--prompt-file", required=True)
+            p.add_argument("--prompt-file", help="Your own analysis prompt")
+            p.add_argument("--template", help="A ready prompt instead of --prompt-file: " + ", ".join(templates()))
+            p.add_argument("--target", action="append", help="A selected file to analyze (repeatable); default: every selected file")
             p.add_argument("--output", required=True)
             p.add_argument("--codex-login", help="Dedicated ChatGPT login file created by codex-login (Codex only)")
         if operation == "codex-login":

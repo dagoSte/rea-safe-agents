@@ -58,8 +58,9 @@ functions are a library used inside the agent image.
 
 ## Analyze inside both containers
 
-Use `scripts/agent_container.py run` with an explicit model, prompt file and new
-private output directory, only after live model spending and selected data
+Use `scripts/agent_container.py run` with an explicit model, a prompt file or a
+ready template (`--template triage|executable|javascript|archive`, optionally
+`--target` for some selected files) and a new private output directory, only after live model spending and selected data
 sharing are authorized. A matching verification receipt is required. Changes
 to images, helpers, deployment or OS require reconfiguration and verification.
 

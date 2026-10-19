@@ -131,6 +131,20 @@ class AgentBoundaryTests(unittest.TestCase):
                     self.assertIn('sandbox_mode = "read-only"', config)
                     self.assertIn('wire_api = "responses"', config)
 
+    def test_claude_turn_budget_is_set_by_the_controller_within_a_cap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            session = {"client": "claude", "executable": "/trusted/client"}
+            mcp = agent.mcp_command(root / "deployment.json")
+            options = {"mock_url": "http://127.0.0.1:12345", "login": agent.OFFLINE_CLAUDE_LOGIN}
+            argv, _ = agent.command(root, session, mcp, **options)
+            self.assertEqual(argv[argv.index("--max-turns") + 1], "20")
+            argv, _ = agent.command(root, session, mcp, max_turns=50, **options)
+            self.assertEqual(argv[argv.index("--max-turns") + 1], "50")
+            for turns in (0, agent.MAX_TURNS + 1, "20"):
+                with self.subTest(turns=turns), self.assertRaises(agent.BoundaryError):
+                    agent.command(root, session, mcp, max_turns=turns, **options)
+
     def test_prompt_cannot_be_parsed_as_a_client_option(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

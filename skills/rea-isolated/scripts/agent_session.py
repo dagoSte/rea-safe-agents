@@ -25,6 +25,7 @@ CODEX_OFF = (
 REVIEWED = {"codex": "codex-cli 0.163.0", "claude": "2.1.302 (Claude Code)"}
 # Seconds one REA call may run; the first native query starts Ghidra.
 TOOL_TIMEOUT = 900
+MAX_TURNS = 100  # upper bound for Claude's agentic turns; the controller sets the actual value
 # Claude signs in with the user's own `claude setup-token` login. Offline checks
 # use this inert value, which the localhost fixture never forwards anywhere.
 CLAUDE_LOGIN = re.compile(r"sk-ant-oat[0-9A-Za-z_-]{8,512}")
@@ -145,7 +146,8 @@ def check_mock_url(value):
             and not parsed.query and not parsed.fragment, "Offline provider must be localhost")
 
 
-def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None):
+def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None, max_turns=20):
+    require(type(max_turns) is int and 0 < max_turns <= MAX_TURNS, "Invalid turn budget")
     client = session["client"]
     env, config_dir = environment(root, client)
     # "--" ends option parsing, so a prompt starting with "-" stays a prompt.
@@ -168,7 +170,7 @@ def command(root, session, mcp, *, mock_url=None, prompt=PROMPT, login=None):
         args = [session["executable"], "--tools", "", "--strict-mcp-config", "--mcp-config", str(mcp_path),
                 "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", "mcp__rea__*", "--no-chrome",
                 "--disable-slash-commands", "--no-session-persistence", "--settings", '{"disableAllHooks":true}',
-                "--max-turns", "20", "--verbose", "--output-format", "stream-json", "-p", "--", prompt]
+                "--max-turns", str(max_turns), "--verbose", "--output-format", "stream-json", "-p", "--", prompt]
         if mock_url:
             check_mock_url(mock_url)
             require(isinstance(login, str) and CLAUDE_LOGIN.fullmatch(login) is not None, "Claude needs the user's own setup-token login")

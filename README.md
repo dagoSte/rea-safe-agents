@@ -369,14 +369,24 @@ enter the code. This login is used only by REA Safe Agent; never reuse your
 everyday Codex login. `codex-models` lists the model IDs your ChatGPT plan
 offers; API model names such as `gpt-5.5` are refused for ChatGPT accounts.
 
-**5. Run an analysis.** Write the task in a prompt file and use a new output
-folder each time.
+**5. Run an analysis.** Pick a ready prompt with `--template` or write your
+own with `--prompt-file`, and use a new output folder each time:
+
+| Template | Use it for |
+| --- | --- |
+| `triage` | A suspicious file: capabilities, indicators, obfuscation and a risk assessment |
+| `executable` | Understanding what a program does, function by function |
+| `javascript` | A JavaScript application or package: endpoints, secrets, risky code |
+| `archive` | The contents of an archive or application package |
 
 ```text
-echo "Analyze /input/suspicious-file with the REA tools and report what it does, its strings, imports and anything suspicious. Close the binary when finished." > ~/.rea-private/control/prompt.txt
-CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.rea-private/claude-login)" python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-private/control/claude.json --model claude-opus-5-5 --prompt-file ~/.rea-private/control/prompt.txt --output ~/.rea-private/runs/first-claude
-python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-private/control/codex.json --model gpt-6.1-sol --prompt-file ~/.rea-private/control/prompt.txt --output ~/.rea-private/runs/first-codex --codex-login ~/.rea-private/control/codex-login.json
+CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.rea-private/claude-login)" python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-private/control/claude.json --model claude-opus-5-5 --template triage --output ~/.rea-private/runs/first-claude
+python3 skills/rea-isolated/scripts/agent_container.py run --config ~/.rea-private/control/codex.json --model gpt-6.1-sol --template triage --output ~/.rea-private/runs/first-codex --codex-login ~/.rea-private/control/codex-login.json
 ```
+
+A template covers every selected file, one at a time; add `--target NAME`
+(repeatable) to choose some of them. More files get more model requests,
+Claude turns and time, up to fixed caps (128 requests, 80 turns, 90 minutes).
 
 The selected files appear to the agent under `/input/`. The agent's final
 report is saved as **`report.md`** in the output folder, headed by the model,
@@ -430,6 +440,18 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 ## What's new
 
 Improvements since the first public release, newest first.
+
+### Ready prompts and several files per session
+
+`run --template` replaces a hand-written prompt with one of four reviewed
+prompts: `triage`, `executable`, `javascript` and `archive`, kept in
+[`skills/rea-isolated/prompts`](skills/rea-isolated/prompts). Each tells the
+model to treat everything inside the files as data, to open and close one
+file at a time and to say what REA could not determine. A session can now
+cover several selected files: `--target` picks some of them, and the model
+request budget, Claude's turn limit and the session time grow with the number
+of files, within fixed caps. A target that is not among the approved files is
+refused.
 
 ### Reports you can read
 
