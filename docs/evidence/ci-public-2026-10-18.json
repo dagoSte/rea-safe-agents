@@ -1,0 +1,35 @@
+{
+  "run_url": "https://github.com/dagoSte/rea-safe-agents/actions/runs/39140058024",
+  "implementation_commit": "54c926c8d513e4e29b12051bede44dda7fbc7042",
+  "conclusion": "success",
+  "policy": {
+    "linux": {
+      "tests_run": 64,
+      "passed": 62,
+      "skipped": 2,
+      "job_url": "https://github.com/dagoSte/rea-safe-agents/actions/runs/39140058024/job/117712453312"
+    },
+    "macos": {
+      "tests_run": 64,
+      "passed": 63,
+      "skipped": 1,
+      "job_url": "https://github.com/dagoSte/rea-safe-agents/actions/runs/39140058024/job/117712453033"
+    },
+    "windows": {
+      "tests_run": 64,
+      "passed": 62,
+      "skipped": 2,
+      "job_url": "https://github.com/dagoSte/rea-safe-agents/actions/runs/39140058024/job/117712453235",
+      "dedicated_account_profile_test": {
+        "tests_run": 1,
+        "passed": 1,
+        "skipped": 0
+      }
+    }
+  },
+  "linux_runtime": {
+    "conclusion": "success",
+    "evidence": "runtime-linux-amd64-2026-10-18.json"
+  },
+  "windows_docker_runtime": "not verified; Experimental"
+}

@@ -1,0 +1,69 @@
+{
+  "host_os": "darwin",
+  "host_arch": "arm64",
+  "rea_image_id": "sha256:496e0a8c6f8c24176ef57c6615d9a2013593e3823a41731ca0732b27ea9ec7d8",
+  "agent_image_id": "sha256:a800c03c6cc1c6a38a2eb763b305dedd75dae1eefa0cc84227d8a61ac0960ac9",
+  "clients": [
+    {
+      "client": "codex",
+      "client_version": "codex-cli 0.163.0",
+      "passed": true,
+      "completed_rea_calls": [
+        "open_binary",
+        "inspect_artifact",
+        "close_binary"
+      ],
+      "child_sha256": "56c40b1a1ff2e0f1fd33517798751713cb57fc6745b29600f48ea9ac12363c11",
+      "agent_probe": {
+        "non_root": true,
+        "no_new_privileges": true,
+        "no_effective_capabilities": true,
+        "seccomp_filter_active": true,
+        "no_active_non_loopback_interface": true,
+        "no_docker_cli": true,
+        "no_docker_socket": true,
+        "no_host_input_mount": true,
+        "no_model_credentials": true,
+        "root_write_denied": true,
+        "outbound_connection_denied": true
+      },
+      "undeclared_tools_rejected": [
+        "apply_patch",
+        "exec_command"
+      ],
+      "model_requests": 4,
+      "real_provider_requests": 0
+    },
+    {
+      "client": "claude",
+      "client_version": "2.1.302 (Claude Code)",
+      "passed": true,
+      "completed_rea_calls": [
+        "open_binary",
+        "inspect_artifact",
+        "close_binary"
+      ],
+      "child_sha256": "56c40b1a1ff2e0f1fd33517798751713cb57fc6745b29600f48ea9ac12363c11",
+      "agent_probe": {
+        "non_root": true,
+        "no_new_privileges": true,
+        "no_effective_capabilities": true,
+        "seccomp_filter_active": true,
+        "no_active_non_loopback_interface": true,
+        "no_docker_cli": true,
+        "no_docker_socket": true,
+        "no_host_input_mount": true,
+        "no_model_credentials": true,
+        "root_write_denied": true,
+        "outbound_connection_denied": true
+      },
+      "undeclared_tools_rejected": [
+        "Bash",
+        "Write"
+      ],
+      "model_requests": 4,
+      "real_provider_requests": 0
+    }
+  ],
+  "fixture_cleanup": "completed"
+}

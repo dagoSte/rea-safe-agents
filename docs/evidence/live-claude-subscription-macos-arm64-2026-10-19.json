@@ -1,0 +1,58 @@
+{
+ "date": "2026-10-19",
+ "host_os": "darwin",
+ "host_arch": "arm64",
+ "auth": "user's own Claude subscription login (claude setup-token), passed through by the gateway",
+ "model": "claude-opus-5-5",
+ "client_version": "2.1.302 (Claude Code)",
+ "rea_version": "6.7.0",
+ "status": "completed-contained-analysis",
+ "completed_rea_calls": [
+  "open_binary",
+  "binary_overview",
+  "list_procedures",
+  "list_strings",
+  "procedure_pseudo_code",
+  "procedure_pseudo_code",
+  "read_bytes",
+  "search_procedures",
+  "xrefs",
+  "list_names",
+  "close_binary"
+ ],
+ "model_requests": 7,
+ "agent_probe": {
+  "non_root": true,
+  "no_new_privileges": true,
+  "no_effective_capabilities": true,
+  "seccomp_filter_active": true,
+  "no_active_non_loopback_interface": true,
+  "no_docker_cli": true,
+  "no_docker_socket": true,
+  "no_host_input_mount": true,
+  "no_model_credentials": true,
+  "root_write_denied": true,
+  "outbound_connection_denied": true
+ },
+ "agent_mount_count": 0,
+ "both_containers_network": "none",
+ "client_holds_subscription_login": true,
+ "client_result": {
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 12,
+  "duration_s": 44
+ },
+ "input": {
+  "name": "relay-probe",
+  "sha256": "1c2a9027a68bd1bd7039a9931b2eab7b360d1a68cae67b588ae6a9bed4464a8e",
+  "kind": "benign x86-64 ELF compiled for this test; source known to the testers"
+ },
+ "report_checked_against_source": [
+  "format and SHA-256",
+  "FNV-1a constants 0x811c9dc5 / 0x1000193",
+  "usage banner",
+  "XOR-0x5a HIDDEN decoded to benign-marker-7731",
+  "imports limited to libc string/print/startup"
+ ]
+}

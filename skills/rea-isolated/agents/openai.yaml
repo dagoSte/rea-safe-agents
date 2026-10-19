@@ -1,0 +1,6 @@
+interface:
+  display_name: "REA Safe Agent"
+  short_description: "Build a contained REA analysis environment"
+  icon_small: "./assets/rea-safe-agent-logo.png"
+  icon_large: "./assets/rea-safe-agent-logo.png"
+  default_prompt: "Use $rea-isolated to set up REA Safe Agent: contain REA and its receiving agent in separate restricted Docker containers and verify both boundaries."

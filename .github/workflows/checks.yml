@@ -1,0 +1,50 @@
+name: Portable policy checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Test rejection and client-boundary logic
+        run: python -m unittest discover -s tests -v
+      - name: Require a passing native Windows profile lookup
+        if: runner.os == 'Windows'
+        run: python tests/verify_windows_profile.py
+  runtime-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Set up the reviewed Docker Engine generation
+        uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70
+        with:
+          version: v29.8.2
+          context: rea-verification
+      - name: Build REA from the audited lockfile
+        run: docker --context rea-verification build --tag rea-local:6.7.0-ghidra-12.1.4-locked skills/rea-isolated/assets
+      - name: Build both pinned receiving clients
+        run: docker --context rea-verification build --file skills/rea-isolated/assets/agent/Dockerfile --tag rea-agent-local:codex-0.163.0-claude-2.1.302-locked skills/rea-isolated
+      - name: Verify both real clients and real REA analysis without a model API
+        run: python tests/verify_runtime.py --context rea-verification --scratch-root "$RUNNER_TEMP"

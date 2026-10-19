@@ -1,0 +1,85 @@
+1
+00:00:00,000 --> 00:00:03,064
+REA Safe Agent is a skill that builds a
+safer,
+
+2
+00:00:03,064 --> 00:00:06,460
+contained environment for analyzing files
+with REA.
+
+3
+00:00:06,960 --> 00:00:10,761
+Use it when your agent must analyze a file
+you don't trust.
+
+4
+00:00:10,761 --> 00:00:14,690
+That file can hand the agent instructions,
+not just evidence.
+
+5
+00:00:15,190 --> 00:00:16,477
+Pick one archive.
+
+6
+00:00:16,477 --> 00:00:22,610
+REA opens it, lists its contents and
+closes it; your agent explains the
+evidence.
+
+7
+00:00:23,110 --> 00:00:27,304
+Only reviewed copies, pinned by size and
+hash, reach REA.
+
+8
+00:00:27,304 --> 00:00:29,880
+Your original folder stays outside.
+
+9
+00:00:30,380 --> 00:00:34,317
+REA and your agent run in separate
+restricted containers.
+
+10
+00:00:34,317 --> 00:00:36,320
+The agent has no host mounts,
+
+11
+00:00:36,320 --> 00:00:39,843
+and the host controller allows only
+approved tools,
+
+12
+00:00:39,843 --> 00:00:42,260
+including read-only Ghidra queries.
+
+13
+00:00:42,760 --> 00:00:45,205
+Neither container has external network.
+
+14
+00:00:45,205 --> 00:00:47,587
+Each agent uses your own subscription,
+
+15
+00:00:47,587 --> 00:00:52,100
+and what it reads from your approved files
+can reach your model service.
+
+16
+00:00:52,600 --> 00:00:54,752
+The file is never executed.
+
+17
+00:00:54,752 --> 00:00:58,100
+Risk goes down, but it never reaches zero.
+
+18
+00:00:58,600 --> 00:01:00,241
+Verify the boundaries.
+
+19
+00:01:00,241 --> 00:01:02,180
+Repeat after every change.

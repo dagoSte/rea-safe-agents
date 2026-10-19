@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.local.json
+*.local.toml
+*.local.log
+input/
+output/
+runtime/
+*.dmg
+*.zip

@@ -1,0 +1,11 @@
+**
+!scripts/
+!scripts/agent_worker.py
+!scripts/agent_session.py
+!scripts/tunnel.py
+!assets/
+!assets/agent/
+!assets/agent/Dockerfile
+!assets/agent/link_clients.py
+!assets/agent/package.json
+!assets/agent/package-lock.json

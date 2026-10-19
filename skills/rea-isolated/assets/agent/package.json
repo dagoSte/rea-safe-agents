@@ -1,0 +1,1 @@
+{"name":"rea-isolated-clients","version":"1.0.0","private":true,"dependencies":{"@openai/codex":"0.163.0","@anthropic-ai/claude-code":"2.1.302"}}

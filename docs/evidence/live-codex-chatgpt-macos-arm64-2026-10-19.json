@@ -1,0 +1,59 @@
+{
+ "date": "2026-10-19",
+ "host_os": "darwin",
+ "host_arch": "arm64",
+ "auth": "dedicated ChatGPT login made by agent_container.py codex-login (device code), held by the controller",
+ "model": "gpt-6.1-sol",
+ "client_version": "codex-cli 0.163.0",
+ "rea_version": "6.7.0",
+ "status": "completed-contained-analysis",
+ "completed_rea_calls": [
+  "open_binary",
+  "binary_overview",
+  "list_procedures",
+  "list_strings",
+  "procedure_pseudo_code",
+  "read_bytes",
+  "procedure_pseudo_code",
+  "procedure_assembly",
+  "close_binary"
+ ],
+ "model_requests": 5,
+ "agent_probe": {
+  "non_root": true,
+  "no_new_privileges": true,
+  "no_effective_capabilities": true,
+  "seccomp_filter_active": true,
+  "no_active_non_loopback_interface": true,
+  "no_docker_cli": true,
+  "no_docker_socket": true,
+  "no_host_input_mount": true,
+  "no_model_credentials": true,
+  "root_write_denied": true,
+  "outbound_connection_denied": true
+ },
+ "agent_mount_count": 0,
+ "both_containers_network": "none",
+ "client_turn_usage": {
+  "input_tokens": 100331,
+  "cached_input_tokens": 61056,
+  "output_tokens": 1058
+ },
+ "input": {
+  "name": "relay-probe",
+  "sha256": "1c2a9027a68bd1bd7039a9931b2eab7b360d1a68cae67b588ae6a9bed4464a8e",
+  "kind": "benign x86-64 ELF compiled for this test; source known to the testers"
+ },
+ "report_checked_against_source": [
+  "format and SHA-256",
+  "FNV-1a constants 0x811c9dc5 / 0x1000193",
+  "usage banner and return codes",
+  "XOR-0x5a HIDDEN decoded to benign-marker-7731",
+  "imports limited to libc string/print/startup"
+ ],
+ "profile_fixes_found_by_live_runs": [
+  "gpt-5.5 is not offered to ChatGPT accounts: use codex-models",
+  "assistant message 'phase' label",
+  "output_text 'logprobs' list"
+ ]
+}
