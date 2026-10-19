@@ -1,0 +1,46 @@
+{
+  "scanner_source_sha256": "e18902854cfe3519fe5e72b4a971b557d187a53b76a26bc1bba23780448fffa4",
+  "identities": {
+    "rea": {
+      "inspected_id": "sha256:c6dc2e5a6a9eb837220cdec87324b5bce30c344766a6bd5166787a6a9775b9ea",
+      "config_id": "sha256:c6dc2e5a6a9eb837220cdec87324b5bce30c344766a6bd5166787a6a9775b9ea",
+      "manifest_id": null,
+      "layer_digests": [
+        "sha256:dca69811453d69d10b6c0345a5c49147162abe20a2f77802d66efc60667949ea",
+        "sha256:da0c0c58041e871b63d148c451055f55713093889b5be37ad753bda51516a864",
+        "sha256:30f65559f915c9c93f6787bb6bd7690c5df44fa4525abd719396d6764adb9c66",
+        "sha256:84e62bf59c8da03d305b081c73cfb6505b47b157e35f8f2a02aa010a5098319f",
+        "sha256:ce3defcc04f94f253fc43a46d5e219e9eaa32e7231ab12561922b65bae914331",
+        "sha256:eedf7c82428ea464c791cedb66a7d7869ac11583d39e56b2853ed59c68be8ee7",
+        "sha256:3a9f9cd9dd6a6c9e95329f79e5598998eb6a68afaf63f75d8e60e4015052fc17",
+        "sha256:01712fd321c132ce6f283f40fac746e51e845525b70d0cbd32a58649af0a12ef",
+        "sha256:4dbc02dabb28551bd76b1b246371d3b09d8162cc2c882d51d5bdb2b8df6e5674",
+        "sha256:9872d3ddeb8a6ba815b8bd81319984527d59e2815908bff363c92a56fc4f9834",
+        "sha256:014de1312939bd5b715da20751f40c4eeccc3744afc01c7006627316610bff39",
+        "sha256:7f843ac27c3cee197a0f8e4a0839436a83826f17ffdfeae31023d2207a0dd732"
+      ],
+      "binding": "config"
+    },
+    "agent": {
+      "inspected_id": "sha256:105fb3ea7144d0dac960b3f9393bcbd4239ead0ae58a2545f91e8207a6d39e3c",
+      "config_id": "sha256:105fb3ea7144d0dac960b3f9393bcbd4239ead0ae58a2545f91e8207a6d39e3c",
+      "manifest_id": null,
+      "layer_digests": [
+        "sha256:dca69811453d69d10b6c0345a5c49147162abe20a2f77802d66efc60667949ea",
+        "sha256:da0c0c58041e871b63d148c451055f55713093889b5be37ad753bda51516a864",
+        "sha256:30f65559f915c9c93f6787bb6bd7690c5df44fa4525abd719396d6764adb9c66",
+        "sha256:84e62bf59c8da03d305b081c73cfb6505b47b157e35f8f2a02aa010a5098319f",
+        "sha256:ce3defcc04f94f253fc43a46d5e219e9eaa32e7231ab12561922b65bae914331",
+        "sha256:fab7a399a8b0fdcb9bbd90d8dae282eeeb1de8f9da7374d1e62d7527fada9c12",
+        "sha256:610a4090a7741ec12f414475a19e7e540bdde1284fec46ef806d874301305830",
+        "sha256:28933252036c006fd04a9bef14768887fdc2879d1206635cf9ed03c54715da5a",
+        "sha256:fffc5c5814a1b6334442ebe82a9f8f2b9df6bb86ebf93baede167ad4459f76aa",
+        "sha256:febb118b5df985a7dfd285c828f985c19bf4e7adcfd94625af4a983dd6aa40a1",
+        "sha256:360e2c126e133c15dbf6ff28bc4b95622f964b3a40bdcdd386312e46a4b3b0a4",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+      ],
+      "binding": "config"
+    }
+  },
+  "scope": "actual macOS ARM64 Docker-save archives with USTAR and case-alias checks; no extraction"
+}

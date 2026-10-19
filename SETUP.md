@@ -126,10 +126,12 @@ python3 -m unittest discover -s tests -v
 python3 tests/verify_runtime.py --context desktop-linux --scratch-root /absolute/private-scratch
 ```
 
-The runtime verifier uses a dedicated temporary staging directory under the
-Docker-shareable scratch root and the diagnostic sharing policy. It exercises
-real container mounts and cleanup; it does not verify a strict Desktop sharing
-configuration. Test that saved policy separately with `desktop_policy.py --strict`.
+By default the runtime verifier uses a dedicated temporary staging directory
+under the Docker-shareable scratch root and the diagnostic sharing policy.
+For an applied strict macOS setup, pass `--staging-root /canonical/shared/staging
+--desktop-share-policy strict`; the private scratch root then stays outside
+Desktop sharing. This exercises container mounts and cleanup alongside the
+saved-policy check. It does not attest every effective VM sharing mechanism.
 
 `verify` uses the real contained client, the real contained REA server and a
 localhost dummy model. It checks the effective model tool catalog, rejects

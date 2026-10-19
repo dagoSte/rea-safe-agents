@@ -26,6 +26,22 @@ containers have network access and no target archives; target parsing has
 bounded temporary space. Reports are linked to the image ID, archive hash,
 scanner digest and dated vulnerability-database hashes.
 
+Docker stores can identify an image by its config, manifest or OCI index;
+Trivy's report identifies its config. The helper verifies the exported
+index/manifest/config chain and stored layer hashes before comparing that
+config ID with the report. It accepts canonical USTAR outer headers only,
+reads bounded JSON and never extracts or decompresses layers on the host.
+Unsupported archive formats, ambiguous selection and case-insensitive JSON
+key collisions fail closed. The last rule also conservatively rejects
+case-distinct keys in data maps, such as labels.
+
+On a Mac with strict Desktop sharing, the scanner's bind sources must also be
+inside the allowed root. Use an exclusive disposable child of that root for
+this optional audit's output/cache and archives, containing no control files,
+logins or analysis reports. Move the evidence to private storage afterward and
+remove that exact disposable audit workspace. Never re-enable broad shares to
+make a scan work. The Linux CI job has no Desktop sharing layer.
+
 An optional `--cache-dir /absolute/private-scanner-cache` reuses only a
 dedicated database cache outside the repository. Dates and hashes are still
 checked. Keep it exclusive to the scan; reuse alone does not establish that

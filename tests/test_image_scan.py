@@ -1,11 +1,14 @@
 """Offline image scanner fixtures: isolation, report policy and failure evidence."""
 
 from datetime import datetime, timedelta, timezone
+import gzip
+import hashlib
 import json
 import io
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,8 +21,8 @@ IMAGE_ID = "sha256:" + "a" * 64
 NOW = datetime(2026, 10, 19, 12, tzinfo=timezone.utc)
 
 
-def report_fixture():
-    return {"SchemaVersion": 2, "ArtifactType": "container_image", "Metadata": {"ImageID": IMAGE_ID}, "Results": [
+def report_fixture(image_id=IMAGE_ID):
+    return {"SchemaVersion": 2, "ArtifactType": "container_image", "Metadata": {"ImageID": image_id}, "Results": [
         {"Target": "debian", "Class": "os-pkgs", "Type": "debian", "Packages": [{"Name": "libc6", "Version": "2.36"}],
          "Vulnerabilities": [{"VulnerabilityID": "CVE-2099-0001", "PkgName": "libc6", "InstalledVersion": "2.36", "Severity": "HIGH"}]},
         {"Target": "app.jar", "Class": "lang-pkgs", "Type": "jar", "Packages": [{"Name": "example:dependency", "Version": "1.0"}],
@@ -28,15 +31,67 @@ def report_fixture():
     ]}
 
 
+def write_archive(path, files):
+    with tarfile.open(path, "w", format=tarfile.USTAR_FORMAT) as archive:
+        for name, raw in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(raw)
+            archive.addfile(info, io.BytesIO(raw))
+
+
+def image_archive_fixture(path, mode="index", label="rea"):
+    """Independent Docker-save metadata with distinct config/manifest/index IDs."""
+    def encoded(value):
+        return json.dumps(value, separators=(",", ":")).encode()
+    def digest(raw):
+        return "sha256:" + hashlib.sha256(raw).hexdigest()
+    def blob(raw, media_type):
+        value = {"mediaType": media_type, "digest": digest(raw), "size": len(raw)}
+        files["blobs/sha256/" + value["digest"][7:]] = raw
+        return value
+    files = {}
+    layer = b"uncompressed fixture layer for " + label.encode()
+    diff_id = digest(layer)
+    config = encoded({"architecture": "amd64", "os": "linux", "rootfs": {"type": "layers", "diff_ids": [diff_id]}, "config": {"User": label}})
+    config_id = digest(config)
+    inspection = {"Id": config_id, "Architecture": "amd64", "Os": "linux", "RootFS": {"Type": "layers", "Layers": [diff_id]}}
+    manifest_id = None
+    if mode == "legacy":
+        config_path, layer_paths = config_id[7:] + ".json", ["layer/layer.tar"]
+        files.update({config_path: config, layer_paths[0]: layer})
+    else:
+        config_descriptor = blob(config, "application/vnd.oci.image.config.v1+json")
+        layer_descriptor = blob(gzip.compress(layer, mtime=0), "application/vnd.oci.image.layer.v1.tar+gzip")
+        manifest = {"schemaVersion": 2, "config": config_descriptor, "layers": [layer_descriptor]}
+        descriptor = blob(encoded(manifest), "application/vnd.oci.image.manifest.v1+json")
+        manifest_id = descriptor["digest"]
+        config_path, layer_paths = "blobs/sha256/" + config_id[7:], ["blobs/sha256/" + layer_descriptor["digest"][7:]]
+        if mode == "index":
+            descriptor["platform"] = {"architecture": "amd64", "os": "linux", "variant": "fixture"}
+            index = {"schemaVersion": 2, "manifests": [descriptor,
+                     {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": "sha256:" + "f" * 64,
+                      "size": 123, "platform": {"architecture": "unknown", "os": "unknown"}}]}
+            descriptor = blob(encoded(index), "application/vnd.oci.image.index.v1+json")
+        inspection.update(Id=descriptor["digest"], Descriptor=descriptor)
+    files["manifest.json"] = encoded([{"Config": config_path, "Layers": layer_paths, "RepoTags": []}])
+    write_archive(path, files)
+    return {"inspection": inspection, "config_id": config_id, "manifest_id": manifest_id, "files": files,
+            "config_path": config_path, "layer_path": layer_paths[0]}
+
+
 class ImageScanTests(unittest.TestCase):
     def test_full_pipeline_uses_immutable_images_and_separates_network_access(self):
         with tempfile.TemporaryDirectory() as temporary:
             output, commands = Path(temporary), []
+            fixtures = {name: image_archive_fixture(output / (name + "-fixture.tar"), mode, name)
+                        for name, mode in (("rea", "index"), ("agent", "legacy"))}
             def fake_run(command, stdout, log, **kwargs):
                 commands.append(command)
                 log.write_text("")
                 if "inspect" in command:
-                    scan.write_json(stdout, [{"Id": IMAGE_ID, "Os": "linux", "Architecture": "arm64"}])
+                    reference = command[-1]
+                    value = {"Id": IMAGE_ID} if reference == scan.SCANNER_IMAGE else fixtures["agent" if reference.startswith("rea-agent-") else "rea"]["inspection"]
+                    scan.write_json(stdout, [value])
                 elif "--version" in command:
                     scan.write_json(stdout, {"Version": scan.SCANNER_VERSION})
                 elif "--download-db-only" in command or "--download-java-db-only" in command:
@@ -47,12 +102,13 @@ class ImageScanTests(unittest.TestCase):
                     (cache / ("trivy.db" if name == "db" else "trivy-java.db")).write_bytes(b"fixture")
                     stdout.write_bytes(b"")
                 elif "save" in command:
-                    Path(command[command.index("--output") + 1]).write_bytes(b"archive fixture")
+                    fixture = next(value for value in fixtures.values() if value["inspection"]["Id"] == command[-1])
+                    write_archive(Path(command[command.index("--output") + 1]), fixture["files"])
                     stdout.write_bytes(b"")
                 elif "convert" in command:
                     scan.write_json(stdout, {"bomFormat": "CycloneDX", "components": [{"name": "example"}]})
                 else:
-                    scan.write_json(stdout, report_fixture())
+                    scan.write_json(stdout, report_fixture(fixtures[stdout.name.split(".")[0]]["config_id"]))
             with patch.object(scan, "run", side_effect=fake_run), patch.object(scan, "utc_now", return_value=NOW):
                 provenance = scan.scan(["docker"], output)
             self.assertEqual(provenance["status"], "complete")
@@ -60,7 +116,7 @@ class ImageScanTests(unittest.TestCase):
             self.assertFalse(list(output.glob("*-archive-*")))
             for command in commands:
                 if "save" in command:
-                    self.assertEqual(command[-1], IMAGE_ID)  # changing a tag after inspect cannot change the scanned bytes
+                    self.assertIn(command[-1], {value["inspection"]["Id"] for value in fixtures.values()})
                 if "--network" in command:
                     network = command[command.index("--network") + 1]
                     if network == "bridge":
@@ -72,7 +128,175 @@ class ImageScanTests(unittest.TestCase):
                         self.assertEqual(command[command.index("--severity") + 1], ",".join(scan.SEVERITIES))
             for name in ("rea", "agent"):
                 self.assertEqual(provenance["images"][name]["status"], "complete")
+                self.assertEqual(provenance["images"][name]["archive_identity"]["config_id"], fixtures[name]["config_id"])
                 self.assertTrue((output / f"{name}.cyclonedx.json").exists())
+
+    def test_legacy_manifest_and_containerd_index_bind_report_to_config(self):
+        for mode in ("legacy", "manifest", "index"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "image.tar"
+                fixture = image_archive_fixture(path, mode)
+                identity = scan.archive_identity(path, fixture["inspection"])
+                self.assertEqual(identity["config_id"], fixture["config_id"])
+                self.assertEqual(identity["manifest_id"], fixture["manifest_id"])
+                scan.summarize_report(report_fixture(fixture["config_id"]), identity["config_id"])
+                if mode != "legacy":
+                    self.assertNotEqual(fixture["inspection"]["Id"], fixture["config_id"])
+                    with self.assertRaises(scan.ScanError):
+                        scan.summarize_report(report_fixture(fixture["inspection"]["Id"]), identity["config_id"])
+
+    def test_archive_rejects_tampered_config_manifest_index_or_layer(self):
+        for mode in ("legacy", "index"):
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "image.tar"
+                fixture = image_archive_fixture(path, mode)
+                for name, original in fixture["files"].items():
+                    if name == "manifest.json":
+                        continue
+                    tampered = dict(fixture["files"])
+                    tampered[name] = bytes([original[0] ^ 1]) + original[1:]
+                    write_archive(path, tampered)
+                    with self.subTest(mode=mode, member=name), self.assertRaises(scan.ScanError):
+                        scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_rejects_unrelated_compatibility_config_and_layers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path)
+            for key, replacement in (("Config", "foreign.json"), ("Layers", ["foreign.tar"])):
+                files = dict(fixture["files"])
+                compatible = json.loads(files["manifest.json"])
+                compatible[0][key] = replacement
+                files["foreign.json"] = files[fixture["config_path"]].replace(b'"User":"rea"', b'"User":"foreign"')
+                files["foreign.tar"] = b"foreign layer"
+                files["manifest.json"] = json.dumps(compatible).encode()
+                write_archive(path, files)
+                with self.subTest(key=key), self.assertRaises(scan.ScanError):
+                    scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_rejects_missing_blobs_and_wrong_inspection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path)
+            for name in fixture["files"]:
+                files = dict(fixture["files"])
+                del files[name]
+                write_archive(path, files)
+                with self.subTest(missing=name), self.assertRaises(scan.ScanError):
+                    scan.archive_identity(path, fixture["inspection"])
+            write_archive(path, fixture["files"])
+            for change in ({"Id": IMAGE_ID}, {"RootFS": {"Type": "layers", "Layers": [IMAGE_ID]}}, {"Architecture": "arm64"}):
+                with self.subTest(change=change), self.assertRaises(scan.ScanError):
+                    scan.archive_identity(path, fixture["inspection"] | change)
+
+    def test_archive_rejects_ambiguous_platform_and_multiple_docker_images(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path)
+            root_path = "blobs/sha256/" + fixture["inspection"]["Id"][7:]
+            files = dict(fixture["files"])
+            index = json.loads(files[root_path])
+            index["manifests"].append(index["manifests"][0])
+            raw = json.dumps(index).encode()
+            root_id = "sha256:" + hashlib.sha256(raw).hexdigest()
+            files["blobs/sha256/" + root_id[7:]] = raw
+            write_archive(path, files)
+            inspection = fixture["inspection"] | {"Id": root_id, "Descriptor": fixture["inspection"]["Descriptor"] | {"digest": root_id, "size": len(raw)}}
+            with self.assertRaisesRegex(scan.ScanError, "unambiguous"):
+                scan.archive_identity(path, inspection)
+            files = dict(fixture["files"])
+            compatible = json.loads(files["manifest.json"])
+            files["manifest.json"] = json.dumps(compatible * 2).encode()
+            write_archive(path, files)
+            with self.assertRaisesRegex(scan.ScanError, "exactly one"):
+                scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_metadata_is_bounded_and_duplicate_members_fail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path)
+            files = dict(fixture["files"])
+            files["manifest.json"] = b" " * (scan.MAX_IMAGE_JSON + 1)
+            write_archive(path, files)
+            with self.assertRaisesRegex(scan.ScanError, "byte budget"):
+                scan.archive_identity(path, fixture["inspection"])
+            write_archive(path, fixture["files"])
+            with patch.object(scan, "MAX_ARCHIVE_MEMBERS", 1), self.assertRaisesRegex(scan.ScanError, "member limit"):
+                scan.archive_identity(path, fixture["inspection"])
+            with tarfile.open(path, "w", format=tarfile.USTAR_FORMAT) as archive:
+                for _ in range(2):
+                    info = tarfile.TarInfo("manifest.json")
+                    info.size = 2
+                    archive.addfile(info, io.BytesIO(b"[]"))
+            with self.assertRaisesRegex(scan.ScanError, "ambiguous paths"):
+                scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_rejects_extensions_links_truncation_and_duplicate_json_keys(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path)
+            for kind in (tarfile.XHDTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.SYMTYPE, tarfile.LNKTYPE):
+                info = tarfile.TarInfo("unsupported")
+                info.type, info.size = kind, 2 ** 32
+                path.write_bytes(info.tobuf(format=tarfile.USTAR_FORMAT) + bytes(1024))
+                with self.subTest(kind=kind), self.assertRaisesRegex(scan.ScanError, "unsupported TAR"):
+                    scan.archive_identity(path, fixture["inspection"])
+            write_archive(path, fixture["files"])
+            path.write_bytes(path.read_bytes()[:515])
+            with self.assertRaises(scan.ScanError):
+                scan.archive_identity(path, fixture["inspection"])
+            files = dict(fixture["files"])
+            files["manifest.json"] = b'[{"Config":"a","Config":"b","Layers":[]}]'
+            write_archive(path, files)
+            with self.assertRaisesRegex(scan.ScanError, "Duplicate image identity JSON key"):
+                scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_rejects_gnu_header_shadowing_the_docker_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path, "legacy")
+            files = dict(fixture["files"])
+            files["foreign/layer.tar"] = b"foreign layer"
+            write_archive(path, files)
+            genuine = path.read_bytes()
+            shadow = json.dumps([{"Config": fixture["config_path"], "Layers": ["foreign/layer.tar"]}]).encode()
+            info = tarfile.TarInfo("manifest.json")
+            info.size = len(shadow)
+            header = bytearray(info.tobuf(format=tarfile.GNU_FORMAT))
+            header[345:357] = b"00000000123\0"  # GNU atime; Python reads this as a USTAR prefix.
+            header[148:156] = b"        "
+            header[148:156] = f"{sum(header):06o}\0 ".encode()
+            self.assertEqual(tarfile.TarInfo.frombuf(header, "utf-8", "strict").name, "00000000123/manifest.json")
+            path.write_bytes(header + shadow + bytes(-len(shadow) % 512) + genuine)
+            with self.assertRaisesRegex(scan.ScanError, "canonical USTAR"):
+                scan.archive_identity(path, fixture["inspection"])
+
+    def test_archive_rejects_case_aliases_that_override_go_manifest_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "image.tar"
+            fixture = image_archive_fixture(path, "legacy")
+            for field, alias_name, foreign in (("Layers", "layers", ["foreign/layer.tar"]),
+                                               ("Layers", "Layerſ", ["foreign/layer.tar"]),
+                                               ("Config", "config", "foreign/config.json"),
+                                               ("RepoTags", "repotags", ["foreign:tag"]),
+                                               ("LayerSources", "layersources", {}),
+                                               ("Key", "Key", "foreign")):
+                for alias_last in (True, False):
+                    files = dict(fixture["files"])
+                    selected = json.loads(files["manifest.json"])[0]
+                    selected.setdefault("LayerSources", {})
+                    selected.setdefault(field, "canonical")
+                    files["manifest.json"] = json.dumps([selected]).encode()
+                    write_archive(path, files)
+                    self.assertEqual(scan.archive_identity(path, fixture["inspection"])["config_id"], fixture["config_id"])
+                    alias = {alias_name: foreign}
+                    selected = selected | alias if alias_last else alias | selected
+                    files["manifest.json"] = json.dumps([selected]).encode()
+                    files["foreign/layer.tar"] = b"foreign layer"
+                    files["foreign/config.json"] = files[fixture["config_path"]]
+                    write_archive(path, files)
+                    with self.subTest(alias=alias_name, alias_last=alias_last), self.assertRaisesRegex(scan.ScanError, "case-insensitive"):
+                        scan.archive_identity(path, fixture["inspection"])
 
     def test_full_report_keeps_unfixed_and_every_severity(self):
         summary = scan.summarize_report(report_fixture(), IMAGE_ID)

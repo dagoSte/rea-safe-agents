@@ -16,10 +16,12 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import uuid
 
@@ -29,6 +31,10 @@ SCANNER_VERSION = "0.76.0"
 SCANNER_IMAGE = "ghcr.io/aquasecurity/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222"
 DB_REPOSITORIES = {"db": "ghcr.io/aquasecurity/trivy-db:2", "java-db": "ghcr.io/aquasecurity/trivy-java-db:1"}
 SEVERITIES = ("UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL")
+IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MAX_ARCHIVE_MEMBERS = 4096
+MAX_IMAGE_JSON = 1024 * 1024
+MAX_IDENTITY_JSON = 8 * MAX_IMAGE_JSON
 LIMITATIONS = [
     "Known-vulnerability matching is not an exploitability assessment or a guarantee of safety.",
     "Offline scanning can miss dependencies that require remote Maven resolution.",
@@ -90,9 +96,160 @@ def inspect(docker, reference, output):
     if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
         raise ScanError("Docker image inspection returned an invalid object")
     image = value[0]
-    if not isinstance(image.get("Id"), str) or not image["Id"].startswith("sha256:"):
+    if not isinstance(image.get("Id"), str) or IMAGE_DIGEST.fullmatch(image["Id"]) is None:
         raise ScanError("Docker image inspection has no image ID")
-    return {key: image.get(key) for key in ("Id", "RepoDigests", "Architecture", "Os", "Created")}
+    return {key: image.get(key) for key in ("Id", "RepoDigests", "Architecture", "Os", "Created", "RootFS", "Descriptor")}
+
+
+def archive_identity(path, inspection):
+    """Bind a plain docker-save tar to its inspected config/manifest/index digest.
+
+    Support plain Docker-save archives with canonical USTAR outer headers only.
+    Read fixed-size headers and bounded JSON; never extract files or decompress
+    layers. Other TAR dialects/extensions and case-insensitive duplicate JSON
+    keys (including data maps) fail closed to avoid Python/Go parser differences.
+    The OCI index -> manifest -> config chain and exact stored layers are hashed;
+    legacy uncompressed layers are checked against the config's DiffIDs.
+    """
+    index_types = {"application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"}
+    manifest_types = {"application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json"}
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ScanError("Image archive must be a regular file")
+        with path.open("rb") as stream:
+            size, members = path.stat().st_size, {}
+            for _ in range(MAX_ARCHIVE_MEMBERS + 1):
+                header = stream.read(512)
+                if header == bytes(512):
+                    if stream.read(512) != bytes(512) or any(stream.read(10240)) or stream.tell() != size:
+                        raise ScanError("Invalid image archive terminator")
+                    break
+                if len(header) != 512 or len(members) >= MAX_ARCHIVE_MEMBERS:
+                    raise ScanError("Image archive is truncated or exceeds the member limit")
+                # Python and Go interpret GNU header prefix/atime bytes differently.
+                if header[257:265] != b"ustar\x0000":
+                    raise ScanError("Image archive requires canonical USTAR headers")
+                info = tarfile.TarInfo.frombuf(header, "utf-8", "strict")
+                name = info.name.rstrip("/") if info.type == tarfile.DIRTYPE else info.name
+                if (info.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+                        or not name or str(PurePosixPath(name)) != name or PurePosixPath(name).is_absolute()
+                        or ".." in PurePosixPath(name).parts or "\\" in name or name in members
+                        or info.size < 0 or info.type == tarfile.DIRTYPE and info.size != 0):
+                    raise ScanError("Image archive contains ambiguous paths, links or unsupported TAR extensions")
+                offset = stream.tell()
+                end = offset + (info.size + 511) // 512 * 512
+                if end > size:
+                    raise ScanError("Image archive member is truncated")
+                members[name] = (offset, info.size, info.type)
+                stream.seek(end)
+            else:
+                raise ScanError("Image archive exceeds the member limit")
+
+            remaining_json = MAX_IDENTITY_JSON
+
+            def member(name):
+                if not isinstance(name, str) or name not in members or members[name][2] == tarfile.DIRTYPE:
+                    raise ScanError("Image archive is missing a referenced regular file")
+                offset, length, _ = members[name]
+                stream.seek(offset)
+                return length
+
+            def document(name):
+                nonlocal remaining_json
+                length = member(name)
+                if length > MAX_IMAGE_JSON or length > remaining_json:
+                    raise ScanError("Image identity JSON exceeds the byte budget")
+                remaining_json -= length
+                raw = stream.read(length)
+                if len(raw) != length:
+                    raise ScanError("Image identity JSON is truncated")
+                def unique(pairs):
+                    value, folded = {}, set()
+                    for key, item in pairs:
+                        if key.casefold() in folded:
+                            raise ScanError("Duplicate image identity JSON key (case-insensitive)")
+                        folded.add(key.casefold())
+                        value[key] = item
+                    return value
+                value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                                   parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite JSON")))
+                return value, "sha256:" + hashlib.sha256(raw).hexdigest()
+
+            def digest_member(name):
+                remaining = member(name)
+                digest = hashlib.sha256()
+                while remaining:
+                    block = stream.read(min(remaining, 1024 * 1024))
+                    if not block:
+                        raise ScanError("Image archive member is truncated")
+                    remaining -= len(block)
+                    digest.update(block)
+                return "sha256:" + digest.hexdigest()
+
+            def blob(descriptor):
+                if (not isinstance(descriptor, dict) or not isinstance(descriptor.get("digest"), str)
+                        or IMAGE_DIGEST.fullmatch(descriptor["digest"]) is None
+                        or type(descriptor.get("size")) is not int or descriptor["size"] <= 0):
+                    raise ScanError("Invalid image identity descriptor")
+                name = "blobs/sha256/" + descriptor["digest"][7:]
+                if member(name) != descriptor["size"]:
+                    raise ScanError("Image descriptor size does not match its archive member")
+                return name
+
+            def verified_document(descriptor):
+                value, digest = document(blob(descriptor))
+                if digest != descriptor["digest"] or not isinstance(value, dict) or value.get("schemaVersion") != 2:
+                    raise ScanError("Image manifest/index digest or schema does not match")
+                return value
+
+            compatible, _ = document("manifest.json")
+            if not isinstance(compatible, list) or len(compatible) != 1 or not isinstance(compatible[0], dict):
+                raise ScanError("Image archive must select exactly one Docker image")
+            selected = compatible[0]
+            config, config_id = document(selected.get("Config"))
+            if (not isinstance(config, dict) or not isinstance(config.get("rootfs"), dict)
+                    or config["rootfs"].get("type") != "layers" or not isinstance(config["rootfs"].get("diff_ids"), list)):
+                raise ScanError("Invalid image configuration/rootfs")
+            diff_ids, layers = config["rootfs"]["diff_ids"], selected.get("Layers")
+            if (not diff_ids or not all(isinstance(item, str) and IMAGE_DIGEST.fullmatch(item) for item in diff_ids)
+                    or not isinstance(layers, list) or len(layers) != len(diff_ids)
+                    or config.get("architecture") != inspection.get("Architecture") or config.get("os") != inspection.get("Os")
+                    or inspection.get("RootFS") != {"Type": "layers", "Layers": diff_ids}):
+                raise ScanError("Exported image platform/rootfs does not match inspection")
+            inspected_id = inspection.get("Id")
+            manifest_id, expected_layers = None, diff_ids
+            if config_id != inspected_id:
+                root = inspection.get("Descriptor")
+                if not isinstance(root, dict) or root.get("digest") != inspected_id:
+                    raise ScanError("No descriptor binds the inspected image to the archive config")
+                value = verified_document(root)
+                if root.get("mediaType") in index_types:
+                    candidates = value.get("manifests")
+                    if not isinstance(candidates, list) or not all(isinstance(item, dict) for item in candidates):
+                        raise ScanError("Invalid image index")
+                    candidates = [item for item in candidates if isinstance(item.get("platform"), dict)
+                                  and item["platform"].get("architecture") == inspection["Architecture"]
+                                  and item["platform"].get("os") == inspection["Os"]]
+                    if len(candidates) != 1:
+                        raise ScanError("Image index does not select one unambiguous inspected platform")
+                    root = candidates[0]
+                    value = verified_document(root)
+                if root.get("mediaType") not in manifest_types:
+                    raise ScanError("Unsupported image manifest descriptor")
+                manifest_id = root["digest"]
+                if blob(value.get("config")) != selected["Config"] or value["config"]["digest"] != config_id:
+                    raise ScanError("Image manifest does not bind the selected config")
+                descriptors = value.get("layers")
+                if not isinstance(descriptors, list) or [blob(item) for item in descriptors] != layers:
+                    raise ScanError("Image manifest does not bind the selected layers")
+                expected_layers = [item["digest"] for item in descriptors]
+            layer_hashes = {name: digest_member(name) for name in dict.fromkeys(layers)}
+            if [layer_hashes[name] for name in layers] != expected_layers:
+                raise ScanError("Image layer bytes do not match the verified image identity")
+            return {"inspected_id": inspected_id, "config_id": config_id, "manifest_id": manifest_id,
+                    "layer_digests": expected_layers, "binding": "config" if manifest_id is None else "manifest/index -> manifest -> config"}
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError, RecursionError, tarfile.HeaderError) as exc:
+        raise ScanError(f"Invalid image archive identity ({type(exc).__name__})") from None
 
 
 def container(docker, mounts=(), network=False, scratch=None, name=None):
@@ -165,7 +322,7 @@ def summarize_report(report, image_id):
     if not isinstance(report, dict) or report.get("SchemaVersion") != 2 or report.get("ArtifactType") != "container_image":
         raise ScanError("Trivy JSON is not a schema-2 container-image report")
     if not isinstance(report.get("Metadata"), dict) or report["Metadata"].get("ImageID") != image_id:
-        raise ScanError("Trivy report image ID does not match the inspected image")
+        raise ScanError("Trivy report image ID does not match the verified archive config")
     results = report.get("Results")
     if not isinstance(results, list) or not results:
         raise ScanError("Trivy report has no result inventory")
@@ -232,6 +389,7 @@ def scan(docker, output, cache=None):
                 run([*docker, "image", "save", "--output", str(archive), evidence["inspection"]["Id"]],
                     output / f"{name}.save.stdout.log", output / f"{name}.save.stderr.log")
                 evidence["archive_sha256"] = sha256(archive)
+                evidence["archive_identity"] = archive_identity(archive, evidence["inspection"])
                 report = output / f"{name}.trivy.json"
                 arguments = ["image", "--input", "/input/image.tar", "--cache-dir", "/cache", "--cache-backend", "memory",
                              "--skip-db-update", "--skip-java-db-update", "--offline-scan", "--disable-telemetry", "--no-progress",
@@ -239,7 +397,7 @@ def scan(docker, output, cache=None):
                              "--severity", ",".join(SEVERITIES), "--ignore-unfixed=false", "--ignorefile", "/dev/null",
                              "--list-all-pkgs", "--exit-code", "0", "--parallel", "2", "--timeout", "15m", "--format", "json"]
                 run_scanner(docker, arguments, report, output / f"{name}.scan.stderr.log", [(archive, "/input/image.tar", True), (cache, "/cache", True)])
-                evidence["summary"] = summarize_report(load_json(report), evidence["inspection"]["Id"])
+                evidence["summary"] = summarize_report(load_json(report), evidence["archive_identity"]["config_id"])
                 sbom = output / f"{name}.cyclonedx.json"
                 run_scanner(docker, ["convert", "--format", "cyclonedx", "/input/report.json"], sbom, output / f"{name}.sbom.stderr.log", [(report, "/input/report.json", True)])
                 validate_sbom(load_json(sbom))

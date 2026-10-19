@@ -37,8 +37,11 @@ repository, webroots, inputs and control/login/output directories. For example:
 mkdir -m 700 "/Users/Shared/rea-safe-staging-$(id -u)"
 ```
 
-That directory is for disposable frozen copies and empty diagnostics only.
-Never store logins, control configurations, reports or other projects there.
+That directory is for disposable frozen copies and empty diagnostics. An
+optional image audit can also use an exclusive disposable child for scanner
+archives/cache and public dependency evidence; move that evidence out and
+remove the child afterward. Never store logins, control configurations,
+analysis reports or other projects there.
 Concurrent runs create separate temporary children and remove them afterward.
 
 Before changing Desktop, review which other projects depend on its existing
@@ -46,7 +49,18 @@ shares. In Desktop Settings > Resources > File sharing, replace broad shares
 with only the canonical staging directory. Apply the change and restart
 Desktop when other workloads may be interrupted. Review synchronized shares
 and other sharing mechanisms separately; the checker does not inspect them.
-This project does not edit global settings or restart Desktop for you.
+The bundled helpers do not edit global settings or restart Desktop. An
+owner-approved operator applies the change separately.
+
+After the approved change, verify the real two-client workflow with original
+fixtures and control files outside sharing:
+
+```text
+python3 tests/verify_runtime.py --context desktop-linux --scratch-root /absolute/private-scratch --staging-root /Users/Shared/rea-safe-staging-501 --desktop-share-policy strict
+```
+
+The existing staging root must be empty and exclusive during this test. The
+test removes its temporary snapshots and leaves the persistent root in place.
 
 ## Pin and enforce the saved policy
 

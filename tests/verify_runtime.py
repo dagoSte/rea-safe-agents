@@ -193,10 +193,13 @@ def verify(args):
     # On Windows choose e.g. C:\REA Verification, outside AppData/USERPROFILE.
     with tempfile.TemporaryDirectory(prefix="rea-runtime-test-", dir=scratch) as temporary:
         root = Path(temporary)
-        selected, control, staging = root / "selected", root / "control", root / "staging"
+        selected, control = root / "selected", root / "control"
+        staging = Path(args.staging_root).resolve(strict=True) if args.staging_root else root / "staging"
         selected.mkdir()
         control.mkdir(mode=0o700)
-        staging.mkdir(mode=0o700)
+        if not args.staging_root:
+            staging.mkdir(mode=0o700)
+        pair.require(not list(staging.iterdir()), "Use an empty, exclusive staging directory for runtime verification")
         with zipfile.ZipFile(selected / "inert.zip", "w", compression=zipfile.ZIP_STORED) as archive:
             archive.writestr("fixture-only.txt", PAYLOAD)
         (selected / "native-fixture").write_bytes(native_fixture())
@@ -206,7 +209,7 @@ def verify(args):
             "docker_config": str(Path(args.docker_config).expanduser().resolve(strict=True)),
             "context": args.context, "image_id": "sha256:" + "0" * 64,
             "input_dir": str(selected.resolve()), "staging_root": str(staging.resolve()),
-            "desktop_share_policy": "diagnostic",
+            "desktop_share_policy": args.desktop_share_policy,
         }
         pair.boundary.validate_config(deployment)
         pair.boundary.preflight(deployment)
@@ -255,7 +258,7 @@ def verify(args):
                             "model_requests": result["model_requests"], "real_provider_requests": 0})
         return {"host_os": sys.platform, "host_arch": platform.machine(), "rea_image_id": deployment["image_id"],
                 "agent_image_id": config["agent_image_id"], "clients": reports, "fixture_cleanup": "completed",
-                "sharing_policy": "diagnostic", "effective_vm_verified": False}
+                "sharing_policy": args.desktop_share_policy, "effective_vm_verified": False}
 
 
 def main():
@@ -264,7 +267,9 @@ def main():
     parser.add_argument("--docker-config", default=str(Path.home() / ".docker"))
     parser.add_argument("--rea-image", default="rea-local:6.7.0-ghidra-12.1.4-locked")
     parser.add_argument("--agent-image", default="rea-agent-local:codex-0.163.0-claude-2.1.302-locked")
-    parser.add_argument("--scratch-root", required=True, help="Existing private, Docker-shareable directory outside protected host state")
+    parser.add_argument("--scratch-root", required=True, help="Existing private scratch directory outside protected host state; must be Docker-shareable unless --staging-root is set")
+    parser.add_argument("--staging-root", help="Existing empty private staging root; defaults to a temporary child of scratch-root")
+    parser.add_argument("--desktop-share-policy", choices=("diagnostic", "strict"), default="diagnostic")
     args = parser.parse_args()
     try:
         print(json.dumps(verify(args), indent=2))

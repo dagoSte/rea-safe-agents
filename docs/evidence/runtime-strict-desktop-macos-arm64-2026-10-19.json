@@ -1,0 +1,93 @@
+{
+  "host_os": "darwin",
+  "host_arch": "arm64",
+  "rea_image_id": "sha256:c6dc2e5a6a9eb837220cdec87324b5bce30c344766a6bd5166787a6a9775b9ea",
+  "agent_image_id": "sha256:105fb3ea7144d0dac960b3f9393bcbd4239ead0ae58a2545f91e8207a6d39e3c",
+  "clients": [
+    {
+      "client": "codex",
+      "rea_profile": "standard",
+      "client_version": "codex-cli 0.163.0",
+      "passed": true,
+      "completed_rea_calls": [
+        "open_binary",
+        "inspect_artifact",
+        "close_binary",
+        "open_binary",
+        "list_strings",
+        "close_binary",
+        "inspect_android_package",
+        "search_android_classes",
+        "inspect_android_method"
+      ],
+      "child_sha256": "56c40b1a1ff2e0f1fd33517798751713cb57fc6745b29600f48ea9ac12363c11",
+      "native_string_recovered": true,
+      "android_package_and_method_recovered": true,
+      "dedicated_staging_cleanup": true,
+      "final_answer_extracted": true,
+      "agent_probe": {
+        "non_root": true,
+        "no_new_privileges": true,
+        "no_effective_capabilities": true,
+        "seccomp_filter_active": true,
+        "no_active_non_loopback_interface": true,
+        "no_docker_cli": true,
+        "no_docker_socket": true,
+        "no_host_input_mount": true,
+        "no_model_credentials": true,
+        "root_write_denied": true,
+        "outbound_connection_denied": true
+      },
+      "undeclared_tools_rejected": [
+        "apply_patch",
+        "exec_command"
+      ],
+      "model_requests": 10,
+      "real_provider_requests": 0
+    },
+    {
+      "client": "claude",
+      "rea_profile": "large",
+      "client_version": "2.1.302 (Claude Code)",
+      "passed": true,
+      "completed_rea_calls": [
+        "open_binary",
+        "inspect_artifact",
+        "close_binary",
+        "open_binary",
+        "list_strings",
+        "close_binary",
+        "inspect_android_package",
+        "search_android_classes",
+        "inspect_android_method"
+      ],
+      "child_sha256": "56c40b1a1ff2e0f1fd33517798751713cb57fc6745b29600f48ea9ac12363c11",
+      "native_string_recovered": true,
+      "android_package_and_method_recovered": true,
+      "dedicated_staging_cleanup": true,
+      "final_answer_extracted": true,
+      "agent_probe": {
+        "non_root": true,
+        "no_new_privileges": true,
+        "no_effective_capabilities": true,
+        "seccomp_filter_active": true,
+        "no_active_non_loopback_interface": true,
+        "no_docker_cli": true,
+        "no_docker_socket": true,
+        "no_host_input_mount": true,
+        "no_model_credentials": true,
+        "root_write_denied": true,
+        "outbound_connection_denied": true
+      },
+      "undeclared_tools_rejected": [
+        "Bash",
+        "Write"
+      ],
+      "model_requests": 10,
+      "real_provider_requests": 0
+    }
+  ],
+  "fixture_cleanup": "completed",
+  "sharing_policy": "strict",
+  "effective_vm_verified": false
+}

@@ -2,6 +2,57 @@
 
 Last updated: 2026-10-19. Live analyses used the owner's own Claude and ChatGPT subscriptions on macOS ARM64.
 
+## 2026-10-19 follow-up: applied macOS sharing restriction
+
+After explicit owner approval, the two saved Desktop sharing lists were
+restricted to one private staging directory and Desktop was restarted. Only
+the sharing-list fields changed; a private backup was retained outside Git.
+The unrelated named-volume database was stopped gracefully and restored
+healthy after the restart. ECI remains off.
+
+- Strict saved-policy checks passed after restart.
+- Bind mounts of existing inert canaries under the account home, `/private/tmp`
+  and the user's temporary directory were refused: the daemon could not see
+  their sources. A matching canary inside staging was read.
+- Both real clients then passed ZIP, Ghidra ELF and JADX APK verification with
+  `--staging-root` and `--desktop-share-policy strict`; all probes and staging
+  cleanup passed, with zero model-provider requests.
+- The owner's existing private REA, Codex and Claude deployments were backed
+  up and reconfigured for those images and the strict staging policy. Their
+  approved input manifest was unchanged, and both offline verifications passed.
+
+The [sharing receipt](evidence/desktop-sharing-macos-arm64-2026-10-19.json) and
+[runtime record](evidence/runtime-strict-desktop-macos-arm64-2026-10-19.json)
+establish those observations. They are not an escape test or proof of all VM
+mounts, synchronized shares or backend mechanisms.
+
+The first [CI run for `c105108`](https://github.com/dagoSte/rea-safe-agents/actions/runs/39267947098)
+passed native policy checks on all three systems and real Linux analysis with
+both clients. The image scanner then failed closed because Docker's containerd
+store reported an OCI-index ID while Trivy reported the image-config ID;
+partial evidence was retained. That run is not a successful full image audit.
+
+| Native policy host | Total | Passed | Skipped |
+| --- | ---: | ---: | ---: |
+| Linux | 198 | 195 | 3 |
+| macOS | 198 | 197 | 1 |
+| Windows | 198 | 189 | 9 |
+
+The additional Windows account-profile check passed separately: one test,
+zero skips. New Windows skips concern POSIX ownership/FIFO/link fixtures;
+they do not establish native Windows Docker coverage.
+
+The scanner follow-up verifies the exported index/manifest/config and layer
+hash chain before accepting Trivy's config ID. A non-author reader reproduced
+and rechecked fixes for GNU-header shadowing and case-insensitive JSON aliases.
+Both guard-removal mutations fail with assertion failures and no fixture errors.
+The final suite passes 207 tests per interpreter on Python 3.11 through 3.14
+on native macOS: 206 passed and one Windows-only lookup skipped. Both actual
+Mac image exports pass the final identity checker; the
+[receipt](evidence/image-identity-macos-arm64-2026-10-19.json) records its exact
+source hash and both identities. Native Linux OCI integration remains a
+separate CI check.
+
 ## 2026-10-19 increment: Desktop sharing and image inventories
 
 Native macOS ARM64 verification, with no model-provider requests or global

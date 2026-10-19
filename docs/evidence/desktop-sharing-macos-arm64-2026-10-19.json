@@ -1,0 +1,49 @@
+{
+  "scope": "Applied saved virtual shares and sampled bind-mount canaries, not a VM escape test or complete backend attestation",
+  "shared_root": "/Users/Shared/rea-safe-staging-501",
+  "saved_shares_match": true,
+  "other_saved_settings_unchanged": true,
+  "eci": false,
+  "mount_probes": [
+    {
+      "scope": "outside",
+      "host_canary_existed": true,
+      "exit_status": 125,
+      "mount_refused": true,
+      "canary_read": false,
+      "diagnostic_kind": "unavailable-to-daemon"
+    },
+    {
+      "scope": "staging",
+      "host_canary_existed": true,
+      "exit_status": 0,
+      "mount_refused": false,
+      "canary_read": true,
+      "diagnostic_kind": null
+    },
+    {
+      "scope": "account-home",
+      "host_canary_existed": true,
+      "exit_status": 125,
+      "mount_refused": true,
+      "canary_read": false,
+      "diagnostic_kind": "unavailable-to-daemon"
+    },
+    {
+      "scope": "user-temporary",
+      "host_canary_existed": true,
+      "exit_status": 125,
+      "mount_refused": true,
+      "canary_read": false,
+      "diagnostic_kind": "unavailable-to-daemon"
+    }
+  ],
+  "unrelated_workload_restored_healthy": true,
+  "runtime_record": "runtime-strict-desktop-macos-arm64-2026-10-19.json",
+  "existing_private_deployments_reconfigured": true,
+  "existing_approved_manifest_preserved": true,
+  "existing_deployment_clients_verified": [
+    "codex",
+    "claude"
+  ]
+}

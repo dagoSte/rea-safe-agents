@@ -33,6 +33,10 @@ and repeat the verification checks.
 - **Verify the boundary again.** Check the actual container settings, reject
   host tools and exercise real REA analysis after changes.
 
+**Security hardening update:** controlled gateway exchanges, 3,702 reproducible
+boundary cases, stricter macOS sharing and whole-image vulnerability evidence.
+[See the strengthening work](#gateway-boundaries-and-repeatable-security-checks).
+
 **Watch the 68-second overview:** what it is for, how the sandbox works and
 where its limits are.
 
@@ -361,6 +365,11 @@ cp /path/to/suspicious-file ~/.rea-private/selected/
 python3 skills/rea-isolated/scripts/container.py configure --image rea-local:6.7.0-ghidra-12.1.4-locked --context desktop-linux --input-dir ~/.rea-private/selected --output ~/.rea-private/control/rea.json
 ```
 
+For macOS with narrowed Desktop sharing, add `--staging-root /canonical/private/staging
+--desktop-share-policy strict` to the configure command, following the
+[dedicated staging guide](docs/desktop-hardening.md). Keep originals, control
+files, logins and reports outside that root.
+
 For a file above 8 MB, add `--profile large`. REA then gets 5 GB of memory, 4
 CPUs and a 2 GB `/tmp`, so give Docker at least 8 GB. Step 3 tells you when a
 selected file needs it, and a run refuses such a file on the standard profile
@@ -489,6 +498,29 @@ for exact pass/skip counts and remaining Windows runtime coverage.
 
 Improvements since the first public release, newest first.
 
+### Gateway boundaries and repeatable security checks
+
+**Contain the analysis. Control the exchange. Verify the boundary.**
+
+The gateway is the controlled bridge between untrusted analysis, the contained
+client and the model service. It checks message structure, byte/depth budgets,
+allowed request fields, file targets and tool calls; limits each tool result;
+and sends model requests only to fixed HTTPS destinations without redirects.
+Hosted tools and reverse MCP callbacks remain blocked.
+
+The security work strengthens both enforcement and its evidence: framing,
+streaming responses, final-answer provenance and resource limits have dedicated
+regressions, supplemented by 3,702 reproducible generated cases and seven guard
+mutations the tests must detect. Non-author reviews reproduce boundary failures
+and recheck fixes. These are internal engineering checks, not an external audit.
+
+Around that bridge, dedicated staging narrows macOS Desktop's shared host
+surface, while full image reports expose OS and Java findings beyond npm.
+Read the [validation record](docs/validation.md),
+[Desktop sharing guide](docs/desktop-hardening.md) and
+[image-audit findings](docs/image-audit.md). Runtime and controller flaws,
+misleading model output and documented coverage limits still require care.
+
 ### Desktop sharing, generated boundary tests and image inventories
 
 A configurable private `--staging-root` keeps frozen copies out of general
@@ -496,10 +528,6 @@ temporary folders. On macOS, `--desktop-share-policy strict` refuses a launch
 unless the saved Desktop virtual-share list contains only that root. Missing,
 conflicting or unsupported saved settings fail the strict check; no helper
 changes global Desktop settings. See [the guide and platform limits](docs/desktop-hardening.md).
-
-The controller suite adds 3,702 reproducible generated cases, with independent
-oracles and seven guard mutations that the tests must detect. This extends
-regression coverage; it is not an external security audit.
 
 CI now inventories both images using digest-pinned Trivy, retaining full
 vulnerability JSON, CycloneDX SBOMs and provenance as artifacts. Scanner errors
