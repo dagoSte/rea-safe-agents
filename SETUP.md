@@ -20,7 +20,10 @@ is required. The reviewed container clients are Codex 0.163.0 and Claude 2.1.302
 
 Show the actual paths, image versions/base digest, networked build steps, input
 files, chosen client and tests before a new installation. Docker-only execution
-and host-held API credentials are mandatory. Explain that selected data may
+is mandatory, and each client uses its owner's subscription, never an API key:
+Claude's own `claude setup-token` login is passed to the contained Claude Code
+for one run, while a dedicated ChatGPT login for Codex stays with the host
+controller. Explain that selected data may
 reach the chosen model provider through analysis results. Obtain approval if
 the installation is not already authorized; continue within existing approval.
 Live model spending or broader file disclosure needs its own authorization.
@@ -144,7 +147,7 @@ and does not permit tools that collect, store or intermediate Claude.ai
 credentials, so the controller never authenticates with a login of its own.
 
 ```text
-python3 skills/rea-isolated/scripts/agent_container.py run --config /absolute/private-control/claude.json --model EXPLICIT_MODEL_ID --prompt-file /absolute/private-control/prompt.txt --output /absolute/private-control/new-analysis
+CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.rea-private/claude-login)" python3 skills/rea-isolated/scripts/agent_container.py run --config /absolute/private-control/claude.json --model EXPLICIT_MODEL_ID --prompt-file /absolute/private-control/prompt.txt --output /absolute/private-control/new-analysis
 ```
 
 **Codex (ChatGPT Plus or Pro).** Create a ChatGPT login used only by REA.

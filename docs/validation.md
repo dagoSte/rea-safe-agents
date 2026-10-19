@@ -21,6 +21,16 @@ which passed all four jobs. The matrix in the last section describes the previou
 | Live Claude subscription analysis, native macOS ARM64 | Passed: `claude-opus-5-5` through the owner's `claude setup-token` login, 7 model requests and 11 successful REA calls; the report matched the known source (see below) |
 | Live Codex analysis with a ChatGPT login, native macOS ARM64 | Passed: `gpt-6.1-sol` through a dedicated `codex-login` device login, 5 model requests and 9 successful REA calls; the report matched the known source. The first live attempts found that `gpt-5.5` is not offered to ChatGPT accounts and that real responses carry two fields the profile then lacked (`phase`, `logprobs`); both are now admitted as bounded data |
 
+An independent three-reviewer audit of the release (commit `4ee3dc0`) confirmed
+three defects, all fixed afterwards and re-checked by a non-author verifier with
+mutation tests: a malformed Codex access token could be printed in an error
+message (tokens must now be header-safe, and rejected headers are reported
+without their value); verifying one configuration could delete another whose
+name looked like its receipt (names are now `<name>.json`, receipt-like names
+are refused in any case, and only a real receipt is ever replaced); and the
+short Codex example lacked `--codex-login`. The audit also reproduced the
+intermittent Windows snapshot error fixed in `de1b335`.
+
 The live Claude run analyzed a benign x86-64 ELF compiled for the test, whose
 source the testers knew. The contained Claude Code opened it, read the overview,
 procedures and strings, decompiled `main` and `fnv1a32`, read the encoded bytes,

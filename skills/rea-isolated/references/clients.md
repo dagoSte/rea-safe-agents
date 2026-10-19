@@ -69,10 +69,21 @@ From the skill directory, after building both images and pinning REA:
 ```text
 python3 scripts/agent_container.py configure --rea-config /absolute/private-control/rea.json --image rea-agent-local:codex-0.163.0-claude-2.1.302-locked --client codex --output /absolute/private-control/codex.json
 python3 scripts/agent_container.py verify --config /absolute/private-control/codex.json
-python3 scripts/agent_container.py run --config /absolute/private-control/codex.json --model EXPLICIT_MODEL_ID --prompt-file /absolute/private-control/prompt.txt --output /absolute/private-control/new-analysis
+python3 scripts/agent_container.py codex-login --config /absolute/private-control/codex.json --output /absolute/private-control/codex-login.json
+python3 scripts/agent_container.py codex-models --codex-login /absolute/private-control/codex-login.json
+python3 scripts/agent_container.py run --config /absolute/private-control/codex.json --model MODEL_FROM_CODEX_MODELS --prompt-file /absolute/private-control/prompt.txt --output /absolute/private-control/new-analysis --codex-login /absolute/private-control/codex-login.json
 ```
 
-Change `--client` and the private config path for Claude. Current support is
+For Claude, configure and verify with `--client claude` and its own config,
+then run with the user's own `claude setup-token` login in the environment of
+that one command (no `--codex-login`):
+
+```text
+CLAUDE_CODE_OAUTH_TOKEN="$(cat /absolute/private-control/claude-login)" python3 scripts/agent_container.py run --config /absolute/private-control/claude.json --model EXPLICIT_MODEL_ID --prompt-file /absolute/private-control/prompt.txt --output /absolute/private-control/new-analysis
+```
+
+Name each configuration `<name>.json`; its receipt is `<name>.verification.json`. Names that look like a
+receipt, in any letter case, are refused, and verification never deletes a file that is not its receipt. Current support is
 Linux/macOS (POSIX); Windows support is experimental. Keep control/output directories private,
 outside the input selection, Git and web server document roots. Global client
 configuration is unchanged. See the [experimental Windows guide](windows-experimental.md)

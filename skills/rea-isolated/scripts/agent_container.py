@@ -48,6 +48,8 @@ RESPONSE_TIMEOUT = 900
 MAX_REA_LINE, REA_ITEM_LIMIT = 12 * 1024 * 1024, 2_000_000
 MAX_REFRESHES = 3
 CODEX_LOGIN_OUTPUT = 1024 * 1024
+HEADER_TOKEN = re.compile(r"[\x21-\x7e]{1,16384}")
+RECEIPT_SUFFIX = ".verification.json"
 RESPONSE_HEADER = re.compile(r"retry-after|x-should-retry|anthropic-ratelimit-unified-[a-z0-9-]{1,64}")
 OAUTH_BETA = "oauth-2025-04-20"
 CODEX_VERSION = "0.163.0"
@@ -116,7 +118,14 @@ def verify_agent(image, data, image_env):
             and host.get("UsernsMode") != "host", "Unexpected agent namespace")
 
 
+def config_name(path):
+    # One receipt per configuration: <name>.json maps to <name>.verification.json.
+    require(path.name.endswith(".json") and not path.name.lower().endswith(RECEIPT_SUFFIX),
+            "Name configurations <name>.json; names ending in " + RECEIPT_SUFFIX + " are reserved for receipts")
+
+
 def configure(args):
+    config_name(Path(args.output))
     rea_path = Path(args.rea_config).expanduser().resolve(strict=True)
     rea = decode_json(rea_path.read_bytes())
     boundary.validate_config(rea)
@@ -128,6 +137,7 @@ def configure(args):
     require(image.get("Config", {}).get("Entrypoint") == AGENT_ENTRY and image.get("Config", {}).get("User") == "node", "Review the bundled agent image first")
     selected = input_snapshot.manifest(Path(rea["input_dir"]))
     output = private_output(args.output)
+    config_name(output)
     require(not output.exists(), "Refusing to overwrite an approved paired deployment")
     require(Path(rea["input_dir"]) not in output.parents, "Control state must stay outside the selected input")
     output.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -144,7 +154,9 @@ def configure(args):
 
 
 def load_config(raw):
+    config_name(Path(raw))
     path = private_output(raw).resolve(strict=True)
+    config_name(path)
     value = decode_json(path.read_bytes())
     require(isinstance(value, dict) and set(value) == {"schema", "rea_config", "rea_sha256", "agent_image_id", "client", "helpers", "inputs"}, "Unexpected paired configuration")
     require(value["schema"] == 1 and value["client"] in profile.REVIEWED, "Unsupported paired profile")
@@ -162,7 +174,20 @@ def identity(path, config):
 
 
 def receipt_path(config_path):
-    return config_path.with_name(config_path.stem + ".verification.json")
+    return config_path.with_name(config_path.stem + RECEIPT_SUFFIX)
+
+
+def clear_receipt(report):
+    """Invalidate an earlier receipt; never delete a file that is not one."""
+    require(not report.is_symlink(), "Refusing " + report.name + ": a link is not a verification receipt; remove it yourself")
+    if report.exists():
+        try:
+            value = decode_json(report.read_bytes())
+        except ProtocolError:
+            value = None
+        require(isinstance(value, dict) and value.get("status") == "verified-contained-offline" and isinstance(value.get("identity"), dict),
+                "Refusing to replace " + report.name + ": it is not a verification receipt")
+        report.unlink()
 
 
 class PipeSink:
@@ -414,6 +439,14 @@ def catalog_names(client, catalogs, *, require_mcp=True):
     return observations
 
 
+def send(connection, method, path, **request):
+    try:
+        connection.request(method, path, **request)
+    except ValueError:
+        # http.client quotes a rejected header, which may hold a credential.
+        raise ProtocolError("Refused an invalid request header") from None
+
+
 def jwt_claims(token):
     """Unverified claims, read only to schedule a refresh before expiry."""
     try:
@@ -447,7 +480,10 @@ def write_private(path, value):
 
 def codex_account(data):
     tokens = data.get("tokens") if isinstance(data, dict) else None
-    if not isinstance(tokens, dict) or not all(isinstance(tokens.get(key), str) and tokens[key] for key in ("access_token", "refresh_token")):
+    # Visible ASCII only: a token that cannot be a header value is refused here,
+    # with a fixed message, before any library can quote it in an error.
+    if not isinstance(tokens, dict) or not all(isinstance(tokens.get(key), str) and HEADER_TOKEN.fullmatch(tokens[key])
+                                               for key in ("access_token", "refresh_token")):
         return None
     claims = jwt_claims(tokens.get("id_token", "")).get("https://api.openai.com/auth", {})
     account = tokens.get("account_id") or (claims.get("chatgpt_account_id") if isinstance(claims, dict) else None)
@@ -499,7 +535,7 @@ class CodexLogin:
                            "refresh_token": self.data["tokens"]["refresh_token"]}).encode()
         connection = http.client.HTTPSConnection(CODEX_AUTH_HOST, 443, context=ssl.create_default_context(), timeout=60)
         try:
-            connection.request("POST", "/oauth/token", body=body, headers={"Content-Type": "application/json", "Accept": "application/json"})
+            send(connection, "POST", "/oauth/token", body=body, headers={"Content-Type": "application/json", "Accept": "application/json"})
             response = connection.getresponse()
             raw = response.read(MAX_BODY + 1)
         finally:
@@ -593,7 +629,7 @@ class ModelGateway:
                     headers.update(self.login.headers())
                 connection = http.client.HTTPSConnection(hostname, 443, context=ssl.create_default_context(), timeout=60)
             try:
-                connection.request("POST", path, body=raw, headers=headers)
+                send(connection, "POST", path, body=raw, headers=headers)
                 response = connection.getresponse()
                 if response.status == 401 and isinstance(self.login, CodexLogin) and attempt == 0:
                     # Renew an expired ChatGPT login once, before anything reaches the client.
@@ -759,7 +795,7 @@ def exercise(config, rea, *, prompt, gateway, timeout, login=None, diagnostics=N
 def verify(args):
     path, config, rea = load_config(args.config)
     report = receipt_path(path)
-    report.unlink(missing_ok=True)
+    clear_receipt(report)
     with fixture(config["client"]) as server:
         # Claude runs its real subscription profile with an inert login, which the
         # gateway checks and the localhost fixture never receives.
@@ -772,7 +808,7 @@ def verify(args):
         require(result["completed_rea_calls"] == ["binary_session"], "The client did not complete a real REA tool call")
         result["undeclared_tools_rejected"] = sorted(server.refused)
     result.update(status="verified-contained-offline", identity=identity(path, config), real_provider_requests=0)
-    profile.write_json(report, result)
+    write_private(report, result)  # replaces, never writes through, whatever is at the path
     return result
 
 
@@ -865,7 +901,7 @@ def codex_models(args):
                                            "User-Agent": "codex_exec/" + CODEX_VERSION})
         connection = http.client.HTTPSConnection(CODEX_HOST, 443, context=ssl.create_default_context(), timeout=60)
         try:
-            connection.request("GET", "/backend-api/codex/models?client_version=" + CODEX_VERSION, headers=headers)
+            send(connection, "GET", "/backend-api/codex/models?client_version=" + CODEX_VERSION, headers=headers)
             response = connection.getresponse()
             raw = response.read(MAX_BODY + 1)
         finally:

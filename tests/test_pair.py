@@ -163,6 +163,27 @@ class SnapshotTests(unittest.TestCase):
         with patch.object(snapshot, "regular_stat", side_effect=stale):
             self.assertEqual(snapshot.manifest(self.root)[0]["path"], "selected/file.txt")
 
+    def test_a_file_changed_during_the_read_or_swapped_before_opening_is_refused(self):
+        real_fstat, calls = os.fstat, []
+        def changing(descriptor):
+            value = real_fstat(descriptor)
+            calls.append(descriptor)
+            if len(calls) == 2:  # the second handle stat, taken after the read
+                fields = {name: getattr(value, name) for name in ("st_mode", "st_nlink", "st_dev", "st_ino", "st_size", "st_ctime_ns")}
+                return SimpleNamespace(**fields, st_mtime_ns=value.st_mtime_ns + 1)
+            return value
+        with patch.object(snapshot.os, "fstat", side_effect=changing), self.assertRaises(tunnel.ProtocolError):
+            snapshot.manifest(self.root)
+        real = snapshot.regular_stat
+        def swapped(path, *, directory=False):
+            value = real(path, directory=directory)
+            if directory:
+                return value
+            return SimpleNamespace(st_dev=value.st_dev, st_ino=value.st_ino + 1, st_mode=value.st_mode, st_nlink=1,
+                                   st_size=value.st_size, st_mtime_ns=value.st_mtime_ns, st_ctime_ns=value.st_ctime_ns)
+        with patch.object(snapshot, "regular_stat", side_effect=swapped), self.assertRaises(tunnel.ProtocolError):
+            snapshot.manifest(self.root)
+
     def test_traversal_and_duplicate_manifest_entries_are_rejected(self):
         for name in ("../key", "/absolute", "a/../key", "a\\key", "a:key", "./file", "a//key", "a\nkey"):
             with self.subTest(name=name), self.assertRaises(tunnel.ProtocolError):
@@ -278,6 +299,23 @@ class AgentContainerTests(unittest.TestCase):
             process.stdout.close.assert_called_once()
             process.stderr.close.assert_called_once()
 
+    def test_receipt_names_are_reserved_and_only_receipts_are_replaced(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(pair.boundary, "preflight") as preflight, self.assertRaises(tunnel.ProtocolError):
+                pair.configure(SimpleNamespace(rea_config=str(root / "rea.json"), image=IMAGE, client="claude",
+                                               output=str(root / "pair.verification.json")))
+            preflight.assert_not_called()
+            other = root / "pair.verification.json"
+            other.write_text(json.dumps({"schema": 1, "client": "codex"}))
+            with self.assertRaises(tunnel.ProtocolError):
+                pair.clear_receipt(other)
+            self.assertTrue(other.exists())  # an unrelated file survives a failed verification
+            other.write_text(json.dumps({"status": "verified-contained-offline", "identity": {}}))
+            pair.clear_receipt(other)
+            self.assertFalse(other.exists())
+            pair.clear_receipt(other)  # absent receipt: nothing to do
+
     def test_output_paths_cannot_enter_the_repository_through_aliases(self):
         repo = pair.HERE.parents[3]
         for path in (repo / "new-private-dir" / "output", repo / "skills/../output"):
@@ -315,6 +353,50 @@ class AgentContainerTests(unittest.TestCase):
                     with self.assertRaises(tunnel.ProtocolError):
                         pair.private_output(project / "private-output")
                     self.assertEqual(pair.private_output(root / "outside"), (root / "outside").resolve())
+
+
+class ControlRecordTests(unittest.TestCase):
+    def test_configuration_names_map_to_exactly_one_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ("pair.verification.json", "pair.Verification.json", "pair.Verification.JSON", "pair.cfg", "pair.JSON", "pair"):
+                with self.subTest(name=name), patch.object(pair.boundary, "preflight") as preflight, self.assertRaises(tunnel.ProtocolError):
+                    pair.configure(SimpleNamespace(rea_config=str(root / "rea.json"), image=IMAGE, client="claude", output=str(root / name)))
+                preflight.assert_not_called()
+            for name in ("x.verification.json", "x.Verification.json", "x.Verification.JSON"):
+                (root / name).write_text("{}")
+                with self.subTest(load=name), self.assertRaises(tunnel.ProtocolError):
+                    pair.load_config(str(root / name))
+
+    def test_failed_verification_never_deletes_another_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, other = root / "pair.json", root / "pair.verification.json"
+            config.write_text("{}")
+            other.write_text(json.dumps({"schema": 1, "client": "codex"}))
+            def attempt():
+                with patch.object(pair, "load_config", return_value=(config, {"client": "codex"}, {})), \
+                        patch.object(pair, "exercise", side_effect=tunnel.ProtocolError("contained client failed")), \
+                        self.assertRaises(tunnel.ProtocolError):
+                    pair.verify(SimpleNamespace(config=str(config)))
+            attempt()
+            self.assertTrue(other.exists())  # not a receipt: kept although verification failed
+            other.write_text(json.dumps({"status": "verified-contained-offline", "identity": {}}))
+            attempt()
+            self.assertFalse(other.exists())  # an earlier receipt is invalidated even when verification then fails
+
+    @unittest.skipIf(os.name == "nt", "POSIX symlink fixture")
+    def test_a_link_at_the_receipt_path_is_refused_and_never_written_through(self):
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as outside:
+            link, target = Path(temporary) / "pair.verification.json", Path(outside) / "created-through-link"
+            link.symlink_to(target)
+            with self.assertRaises(tunnel.ProtocolError):
+                pair.clear_receipt(link)
+            self.assertTrue(link.is_symlink())
+            self.assertFalse(target.exists())
+            pair.write_private(link, {"status": "verified-contained-offline"})
+            self.assertFalse(link.is_symlink())
+            self.assertFalse(target.exists())
 
 
 class MCPPolicyTests(unittest.TestCase):
@@ -572,6 +654,57 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(result, {"models": ["gpt-6.1-sol"]})
             self.assertEqual(connect.call_args.args[:2], ("chatgpt.com", 443))
             self.assertEqual(connect.return_value.request.call_args.args[0], "GET")
+
+    def test_malformed_codex_tokens_never_reach_a_header_or_stderr(self):
+        secret = "synthetic-oauth-access-token"
+        for bad in (secret + "\n", secret + "\r", secret + "\r\n", "synthetic oauth"):
+            with self.subTest(token=repr(bad)), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(pair, "private_output", side_effect=Path), \
+                    patch.object(pair.http.client, "HTTPSConnection") as connect:
+                path = Path(temporary) / "codex-login.json"
+                pair.write_private(path, {"tokens": {"access_token": bad, "refresh_token": "refresh-1", "account_id": "account-1"}})
+                stderr = io.StringIO()
+                with patch.object(sys, "argv", ["agent_container.py", "codex-models", "--codex-login", str(path)]), \
+                        patch.object(sys, "stderr", stderr), patch.object(sys, "stdout", io.StringIO()):
+                    self.assertEqual(pair.main(), 1)
+                self.assertNotIn(secret, stderr.getvalue())
+                self.assertNotIn("synthetic", stderr.getvalue())
+                connect.assert_not_called()
+                self.assertFalse(path.with_name(path.name + ".lock").exists())
+
+    def test_rejected_header_errors_are_reported_without_their_value(self):
+        class Connection:
+            def request(self, *args, **kwargs):
+                raise ValueError("Invalid header value b'Bearer synthetic-oauth-access-token\\n'")
+        with self.assertRaises(tunnel.ProtocolError) as caught:
+            pair.send(Connection(), "GET", "/", headers={})
+        self.assertNotIn("synthetic", str(caught.exception))
+
+    def test_gateway_and_model_list_never_quote_a_rejected_header(self):
+        invalid = {"Authorization": "Bearer synthetic-secret\n", "ChatGPT-Account-ID": "account-1"}
+        offline = lambda *args, **kwargs: pair.http.client.HTTPConnection("127.0.0.1", 9, timeout=1)
+        with tempfile.TemporaryDirectory() as temporary, patch.object(pair, "private_output", side_effect=Path), \
+                patch.object(pair.http.client, "HTTPSConnection", side_effect=offline), \
+                patch.object(pair.CodexLogin, "headers", return_value=invalid):
+            path = codex_login_file(temporary, pair.time.time() + 3600)
+            with pair.CodexLogin(path) as login, self.assertRaises(tunnel.ProtocolError) as caught:
+                gateway = pair.ModelGateway("codex", model="explicit-model", login=login)
+                gateway.exchange(frame(body=tunnel.pack(json.dumps({"stream": True, "tools": catalog("codex")}).encode())), RecordingWire())
+            self.assertNotIn("synthetic", str(caught.exception))
+            with self.assertRaises(tunnel.ProtocolError) as caught:
+                pair.codex_models(SimpleNamespace(codex_login=str(path)))
+            self.assertNotIn("synthetic", str(caught.exception))
+
+    def test_a_refreshed_token_that_cannot_be_a_header_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(pair, "private_output", side_effect=Path), \
+                patch.object(pair.http.client, "HTTPSConnection") as connect:
+            path = codex_login_file(temporary, pair.time.time() + 60)
+            bad = json.dumps({"access_token": "synthetic-refreshed-token\r\n", "refresh_token": "refresh-2"}).encode()
+            connect.return_value.getresponse.return_value = Response(200, bad)
+            with pair.CodexLogin(path) as login, self.assertRaises(tunnel.ProtocolError) as caught:
+                login.headers()
+            self.assertNotIn("synthetic", str(caught.exception))
+            self.assertEqual(json.loads(path.read_text())["tokens"]["refresh_token"], "refresh-1")
 
     def test_codex_client_credentials_and_gateway_without_login_are_refused(self):
         with self.assertRaises(tunnel.ProtocolError):
