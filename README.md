@@ -16,7 +16,7 @@
 [![Native runtime verified: Linux and macOS](https://img.shields.io/badge/Native_runtime_verified-Linux_%2B_macOS-2ea44f)](docs/validation.md)
 [![Live analysis: Claude and Codex subscriptions](https://img.shields.io/badge/Live_analysis-Claude_%2B_Codex_subscriptions-2ea44f)](docs/validation.md)
 
-**[Quick start](#quick-start)** · [At a glance](#at-a-glance) · [When it helps](#when-it-helps) · [How it works](#how-the-sandbox-works) · [Tools](#available-analysis-tools) · [Step-by-step setup](#step-by-step-setup) · [Security](#security-controls-and-scope) · [Validation](#validation) · [Credits](#credits-and-upstream-rea)
+**[Quick start](#quick-start)** · [At a glance](#at-a-glance) · [When it helps](#when-it-helps) · [How it works](#how-the-sandbox-works) · [Tools](#available-analysis-tools) · [Step-by-step setup](#step-by-step-setup) · [Security](#security-controls-and-scope) · [Validation](#validation) · [What's new](#whats-new) · [Credits](#credits-and-upstream-rea)
 
 **REA Safe Agent is a skill that builds a safer, contained environment for
 analyzing files with REA.**
@@ -420,6 +420,25 @@ The [public verification run](https://github.com/dagoSte/rea-safe-agents/actions
 passed all four jobs: Linux/macOS/Windows policy checks and native Linux real
 analysis through both contained clients. See the [dated validation record](docs/validation.md)
 for exact pass/skip counts and remaining Windows runtime coverage.
+
+## What's new
+
+Improvements since the first public release, newest first.
+
+### Weekly pinned-version check
+
+REA Safe Agent pins exact versions of REA, Claude Code, Codex, Ghidra, the
+Temurin JDK and the Node base image, so a release is reproducible and every
+client version is reviewed before it is trusted. Pins also go stale. Every
+Monday a [workflow](.github/workflows/versions.yml) compares them with the
+upstream releases. When something is behind, it opens or updates one issue,
+**Pinned versions to review**, with the new versions and every file that still
+mentions the old ones; it closes the issue once everything is current. Ghidra
+is compared within the line REA verifies, and a newer line is only noted.
+
+Run the same check locally with `python3 tools/check_versions.py`. It never
+changes a pin: an update stays a reviewed change, with a new checksum or
+digest, rebuilt images and a fresh verification.
 
 ## Credits and upstream REA
 
