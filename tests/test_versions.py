@@ -66,6 +66,11 @@ class PinTests(unittest.TestCase):
             old_jdk, old_build = real["temurin-jdk-21"].split("+")
             dockerfile.write_text(dockerfile.read_text().replace("jdk-" + old_jdk + "%2B" + old_build, "jdk-21.0.99%2B4"))
             self.assertEqual(versions.read_pins(root), replaced)
+            manifest = root / versions.ASSETS / "agent/package.json"
+            manifest.write_text(manifest.read_text().replace('"0.900.1"', '"00.900.1"'))
+            with self.assertRaises(ValueError):  # a pin is validated like an upstream version
+                versions.read_pins(root)
+            manifest.write_text(manifest.read_text().replace('"00.900.1"', '"0.900.1"'))
             agent = root / versions.ASSETS / "agent/Dockerfile"
             agent.write_text(agent.read_text().replace(DIGEST_A, DIGEST_B))
             with self.assertRaises(ValueError):  # both images must share one Node version and digest
@@ -88,6 +93,38 @@ class PinTests(unittest.TestCase):
             self.assertTrue(behind)  # every upstream row is "current", yet the issue must stay open
             self.assertIn("disagree", markdown)
 
+    def test_native_builds_and_reviewed_constants_are_checked_exactly(self):
+        pins = versions.read_pins(ROOT)
+        lockfile = versions.ASSETS / "agent/package-lock.json"
+        claude, codex = pins["claude-code"], pins["codex"]
+        def stale_native(text, package, version):
+            data = json.loads(text)
+            name = next(name for name in data["packages"] if name.startswith("node_modules/" + package + "-"))
+            entry = data["packages"][name]
+            entry["resolved"] = entry["resolved"].replace("-" + version, "-0.0.1")
+            entry["version"] = entry["version"].replace(version, "0.0.1")
+            return json.dumps(data)
+        cases = {
+            "stale Claude native build": (lockfile, lambda text: stale_native(text, "@anthropic-ai/claude-code", claude)),
+            "stale Codex native build": (lockfile, lambda text: stale_native(text, "@openai/codex", codex)),
+            "stale Codex native alias": (lockfile, lambda text: text.replace(f'"npm:@openai/codex@{codex}-linux-x64"', '"npm:@openai/codex@0.0.1-linux-x64"')),
+            "Codex constant behind a comment": (versions.SCRIPTS / "agent_container.py", lambda text: text.replace(
+                f'CODEX_VERSION = "{codex}"', f'# CODEX_VERSION = "{codex}"\nCODEX_VERSION = "0.0.1"')),
+            "reviewed Claude behind a comment": (versions.SCRIPTS / "agent_session.py", lambda text: text.replace(
+                f'"{claude} (Claude Code)"', f'"0.0.1 (Claude Code)"}}  # "{claude} (Claude Code)"\n_ = {{0: 0')),
+            "image tag only in a comment": (Path("tests/verify_runtime.py"), lambda text: text.replace(
+                f"claude-{claude}-locked", "claude-0.0.1-locked") + f"\n# rea-agent-local:codex-{codex}-claude-{claude}-locked\n"),
+        }
+        for label, (path, change) in cases.items():
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                copy_pinned_tree(root)
+                text = (root / path).read_text()
+                changed = change(text)
+                self.assertNotEqual(changed, text)
+                (root / path).write_text(changed)
+                self.assertNotEqual(versions.consistency(root, pins), [])
+
 
 class ComparisonTests(unittest.TestCase):
     def test_versions_compare_per_component(self):
@@ -97,7 +134,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertLess(key("ghidra", "7.3"), key("ghidra", "7.3.2"))
         self.assertLess(key("codex", "0.99.0"), key("codex", "0.150.0"))
         for component, value in (("codex", "2.0.0-beta.1"), ("codex", "2.0.0+build.9"), ("codex", "not-a-version"),
-                                 ("codex", []), ("node-image", "sha256:short"), ("ghidra", "7.3\n# heading")):
+                                 ("codex", []), ("node-image", "sha256:short"), ("ghidra", "7.3\n# heading"),
+                                 ("codex", "00.163.0"), ("codex", "0.0163.0"), ("codex", "\u0660.\u0661\u0666\u0663.\u0660"),
+                                 ("ghidra", "07.3"), ("temurin-jdk-21", "21.0.12+011"), ("node", "\uff12\uff14.1.0")):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 key(component, value)
 
@@ -202,7 +241,8 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             files = {"assets/Dockerfile": "FROM x:3.4.98-slim", "assets/package-lock.json": '"version": "3.4.98"',
-                     "scripts/session.py": "uses 3.4.98.", "scripts/other.py": "3.4.980 and 13.4.98",
+                     "scripts/session.py": "uses 3.4.98.", "scripts/other.py": "3.4.980, 13.4.98, 3.4.98.1 and 0.3.4.98",
+                     "scripts/tag.py": "release v3.4.98", "scripts/name.py": "cache_3.4.98-x64",
                      "docs/validation.md": "verified 3.4.98", "docs/evidence/run.json": '"3.4.98"', "media/notes.md": "3.4.98"}
             for name, text in files.items():
                 (root / name).parent.mkdir(parents=True, exist_ok=True)
@@ -213,8 +253,45 @@ class ReportTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(root)], check=True)
             subprocess.run(["git", "-C", str(root), "add", *files], check=True)
             active, historical = versions.locations(root, "3.4.98")
-        self.assertEqual(active, ["assets/Dockerfile", "assets/package-lock.json", "scripts/session.py"])
+        self.assertEqual(active, ["assets/Dockerfile", "assets/package-lock.json", "scripts/name.py",
+                                  "scripts/session.py", "scripts/tag.py"])
         self.assertEqual(historical, ["docs/evidence/run.json", "docs/validation.md"])
+
+    def test_a_failed_file_listing_is_reported_not_replaced(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)  # not a Git checkout
+            (root / "notes.py").write_text("3.4.98\n")
+            with self.assertRaises(versions.EnumerationError):
+                versions.tracked_files(root)
+            pins = versions.read_pins(ROOT)
+            latest = current_latest(pins) | {"codex": ("999.0.0", "")}
+            rows, behind, markdown = versions.report(root, pins, latest, [])
+        self.assertTrue(behind)
+        self.assertEqual({row["component"]: row["files"] for row in rows}["codex"], [])
+        self.assertIn("tracked files could not be listed", markdown)
+
+
+class StatusTests(unittest.TestCase):
+    def status(self, latest):
+        pins = versions.read_pins(ROOT)
+        with patch.object(versions, "latest_versions", return_value=latest(pins)), \
+                patch.object(versions, "sync_issue") as sync, patch.object(sys, "stdout", io.StringIO()), \
+                patch.object(sys, "argv", ["check_versions.py"]):
+            code = versions.main()
+        sync.assert_not_called()
+        return code
+
+    def test_a_standalone_check_fails_unless_everything_is_current(self):
+        self.assertEqual(self.status(current_latest), 0)
+        self.assertEqual(self.status(lambda pins: current_latest(pins) | {"codex": ("999.0.0", "")}), 1)
+        self.assertEqual(self.status(lambda pins: current_latest(pins) | {"ghidra": (None, "check failed: OSError")}), 1)
+
+    def test_scheduled_runs_never_overlap(self):
+        text = (ROOT / ".github/workflows/versions.yml").read_text(encoding="utf-8")
+        block = text[text.index("\nconcurrency:\n"):].split("\n\n")[0].splitlines()[1:]
+        self.assertEqual([line.strip() for line in block], ["concurrency:", "group: pinned-version-check", "cancel-in-progress: false"])
+        self.assertIn("issues: write", text)
+        self.assertNotIn("pull-requests: write", text)
 
 
 class IssueTests(unittest.TestCase):

@@ -474,18 +474,23 @@ compares them with the upstream releases:
 - Ghidra is compared within the line REA verifies; a newer line is only noted.
 - The Node image digest is compared with the tag's current digest, because a
   tag can be rebuilt without a new version number.
-- Lockfiles, the reviewed-client constants and the image tags must agree with
-  the pins; a half-finished update is reported, not taken as current.
-- Prereleases and malformed answers are reported as "could not check", never
-  as current. Redirects are refused, so the workflow token cannot follow one.
+- Lockfiles, including each platform build of Claude Code and Codex, the
+  reviewed-client constants and the image tags must agree with the pins. The
+  constants are read from the code itself, so a comment cannot stand in for
+  them, and a half-finished update is reported, not taken as current.
+- Prereleases and malformed answers, such as `00.1.0` or digits from another
+  script, are reported as "could not check", never as current. Redirects are
+  refused, so the workflow token cannot follow one.
 
 While anything is behind, inconsistent or uncheckable, one labelled issue,
 **Pinned versions to review**, lists it with every file that still mentions
-the old version; dated records such as the validation log are listed apart
-and left as history. The issue closes once everything is current. Runs never
+the old version, including forms like `v1.2.3`; the list comes from Git, and
+if Git cannot list the files the issue says so. Dated records such as the
+validation log are listed apart and left as history. The issue closes once everything is current. Runs never
 overlap, and an issue someone else opened with the same title is never touched.
 
-Run the same check locally with `python3 tools/check_versions.py`. It never
+Run the same check locally with `python3 tools/check_versions.py`; it exits
+with 1 while anything is behind, inconsistent or uncheckable. It never
 changes a pin: an update stays a reviewed change, with a new checksum or
 digest, rebuilt images and a fresh verification.
 

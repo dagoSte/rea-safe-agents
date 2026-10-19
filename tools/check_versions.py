@@ -13,6 +13,7 @@ Exit status without --sync-issue: 0 when every pin is current and consistent,
 """
 
 import argparse
+import ast
 import json
 import os
 from pathlib import Path
@@ -34,9 +35,12 @@ SKIPPED = ("media/", "node_modules/", ".git/")
 HOSTS = {"registry.npmjs.org", "api.github.com", "api.adoptium.net", "nodejs.org", "auth.docker.io", "registry-1.docker.io"}
 # Release versions only: an npm "latest" tag pointing at a prerelease or a build
 # suffix is reported as uncheckable rather than proposed as an update.
-SYNTAX = {"rea-agents": r"\d+\.\d+\.\d+", "claude-code": r"\d+\.\d+\.\d+", "codex": r"\d+\.\d+\.\d+",
-          "ghidra": r"\d+\.\d+(?:\.\d+)?", "temurin-jdk-21": r"21(?:\.\d+){1,3}\+\d+", "node": r"\d+\.\d+\.\d+",
-          "node-image": r"sha256:[0-9a-f]{64}"}
+NUMBER = r"(?:0|[1-9][0-9]*)"  # canonical ASCII: no leading zeros, no other digit scripts
+SEMVER = NUMBER + r"\." + NUMBER + r"\." + NUMBER
+SYNTAX = {"rea-agents": SEMVER, "claude-code": SEMVER, "codex": SEMVER,
+          "ghidra": NUMBER + r"\." + NUMBER + r"(?:\." + NUMBER + r")?", "temurin-jdk-21": r"21(?:\." + NUMBER + r"){1,3}\+" + NUMBER,
+          "node": SEMVER, "node-image": r"sha256:[0-9a-f]{64}"}
+IMAGE_TAG = re.compile(r"rea-(?:agent-)?local:[A-Za-z0-9._-]+")
 NODE_TAG = "{}-bookworm-slim"
 
 
@@ -82,42 +86,72 @@ def read_pins(root):
     clients = json.loads((root / ASSETS / "agent/package.json").read_text(encoding="utf-8"))["dependencies"]
     rea_image = (root / ASSETS / "Dockerfile").read_text(encoding="utf-8")
     agent_image = (root / ASSETS / "agent/Dockerfile").read_text(encoding="utf-8")
-    ghidra = re.search(r"/Ghidra_(\d+(?:\.\d+)+)_build/", rea_image)
-    jdk = re.search(r"/jdk-(21(?:\.\d+)+)%2B(\d+)/", rea_image)
-    nodes = [re.search(r"^FROM node:(\d+\.\d+\.\d+)-bookworm-slim@(sha256:[0-9a-f]{64})", text, re.M) for text in (rea_image, agent_image)]
+    ghidra = re.search(r"/Ghidra_([0-9]+(?:\.[0-9]+)+)_build/", rea_image)
+    jdk = re.search(r"/jdk-(21(?:\.[0-9]+)+)%2B([0-9]+)/", rea_image)
+    nodes = [re.search(r"^FROM node:([0-9]+\.[0-9]+\.[0-9]+)-bookworm-slim@(sha256:[0-9a-f]{64})", text, re.M) for text in (rea_image, agent_image)]
     if not (ghidra and jdk and all(nodes)):
         raise ValueError("A pinned version could not be found in the Dockerfiles")
     if len({match.groups() for match in nodes}) != 1:
         raise ValueError("The two Dockerfiles pin different Node images")
-    return {"rea-agents": rea["rea-agents"], "claude-code": clients["@anthropic-ai/claude-code"],
+    pins = {"rea-agents": rea["rea-agents"], "claude-code": clients["@anthropic-ai/claude-code"],
             "codex": clients["@openai/codex"], "ghidra": ghidra.group(1),
             "temurin-jdk-21": jdk.group(1) + "+" + jdk.group(2), "node": nodes[0].group(1), "node-image": nodes[0].group(2)}
+    for name, value in pins.items():
+        comparable(name, value)  # a pin outside the canonical syntax is an error, not a version
+    return pins
+
+
+def python_values(path):
+    """Constants assigned in a Python file and string comparisons with server_version, read from its syntax tree."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    assigned, compared = {}, []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                assigned[node.targets[0].id] = ast.literal_eval(node.value)
+            except ValueError:
+                continue
+        elif isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute) and node.left.attr == "server_version":
+            compared += [item.value for item in node.comparators if isinstance(item, ast.Constant)]
+    return assigned, compared
 
 
 def consistency(root, pins):
     """Executable places that must agree with the pins; return each disagreement."""
     problems = []
     def lock(path, package, version):
-        data = json.loads((root / path).read_text(encoding="utf-8"))
-        packages = data.get("packages", {})
-        if packages.get("", {}).get("dependencies", {}).get(package) != version or packages.get("node_modules/" + package, {}).get("version") != version:
+        packages = json.loads((root / path).read_text(encoding="utf-8")).get("packages", {})
+        main = packages.get("node_modules/" + package, {})
+        if packages.get("", {}).get("dependencies", {}).get(package) != version or main.get("version") != version:
             problems.append(f"{path} does not lock {package} {version}")
+        # The package's own native builds hold the binaries the image runs: each must be the same release.
+        natives = [name for name in main.get("optionalDependencies") or {} if name.startswith(package + "-")]
+        for name in [package, *natives]:
+            spec = (main.get("optionalDependencies") or {}).get(name, version)
+            entry = packages.get("node_modules/" + name, {})
+            entry_version = entry.get("version", "")
+            if spec != version and not spec.startswith("npm:" + package + "@" + version + "-"):
+                problems.append(f"{path} pins {name} to {spec}, not {package} {version}")
+            if (entry_version != version and not entry_version.startswith(version + "-")
+                    or not entry.get("resolved", "").endswith("-" + entry_version + ".tgz")):
+                problems.append(f"{path} locks {name} at {entry_version or 'nothing'} instead of {package} {version}")
     lock(ASSETS / "package-lock.json", "rea-agents", pins["rea-agents"])
     lock(ASSETS / "agent/package-lock.json", "@anthropic-ai/claude-code", pins["claude-code"])
     lock(ASSETS / "agent/package-lock.json", "@openai/codex", pins["codex"])
-    session = (root / SCRIPTS / "agent_session.py").read_text(encoding="utf-8")
-    if f'"codex": "codex-cli {pins["codex"]}"' not in session or f'"claude": "{pins["claude-code"]} (Claude Code)"' not in session:
+    session, _ = python_values(root / SCRIPTS / "agent_session.py")
+    if session.get("REVIEWED") != {"codex": "codex-cli " + pins["codex"], "claude": pins["claude-code"] + " (Claude Code)"}:
         problems.append(f"{SCRIPTS}/agent_session.py REVIEWED does not name both pinned clients")
-    container = (root / SCRIPTS / "agent_container.py").read_text(encoding="utf-8")
-    if f'CODEX_VERSION = "{pins["codex"]}"' not in container:
+    container, compared = python_values(root / SCRIPTS / "agent_container.py")
+    if container.get("CODEX_VERSION") != pins["codex"]:
         problems.append(f"{SCRIPTS}/agent_container.py CODEX_VERSION is not {pins['codex']}")
-    if f'policy.server_version == "{pins["rea-agents"]}"' not in container:
+    if compared != [pins["rea-agents"]]:
         problems.append(f"{SCRIPTS}/agent_container.py does not require REA {pins['rea-agents']}")
-    tags = [f"rea-local:{pins['rea-agents']}-ghidra-{pins['ghidra']}-locked",
-            f"rea-agent-local:codex-{pins['codex']}-claude-{pins['claude-code']}-locked"]
+    expected = {f"rea-local:{pins['rea-agents']}-ghidra-{pins['ghidra']}-locked",
+                f"rea-agent-local:codex-{pins['codex']}-claude-{pins['claude-code']}-locked"}
     for path in (".github/workflows/checks.yml", "tests/verify_runtime.py"):
-        text = (root / path).read_text(encoding="utf-8")
-        problems += [f"{path} does not use the image tag {tag}" for tag in tags if tag not in text]
+        tags = set(IMAGE_TAG.findall((root / path).read_text(encoding="utf-8")))  # every mention, comments included
+        if tags != expected:
+            problems.append(f"{path} uses image tags {', '.join(sorted(tags)) or 'none'} instead of {', '.join(sorted(expected))}")
     return problems
 
 
@@ -180,18 +214,24 @@ def latest_versions(pins):
     return results
 
 
+class EnumerationError(RuntimeError):
+    pass
+
+
 def tracked_files(root):
+    """Files under version control; untracked local files are never listed."""
     try:
         output = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
         names = [name for name in output.decode("utf-8").split("\0") if name]
-    except (OSError, subprocess.CalledProcessError, UnicodeDecodeError):
-        names = [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()]
+    except (OSError, subprocess.CalledProcessError, UnicodeDecodeError) as exc:
+        raise EnumerationError("tracked files could not be listed (" + type(exc).__name__ + ")") from None
     return sorted(name for name in names if not name.startswith(SKIPPED))
 
 
 def locations(root, version):
     """Tracked text files that mention a version: (to update, historical records)."""
-    pattern = re.compile(r"(?<![\w.])" + re.escape(version) + r"(?![\w]|\.\d)")
+    # v1.2.3 and name_1.2.3 count; 11.2.3, 1.2.30 and 1.2.3.4 do not.
+    pattern = re.compile(r"(?<![0-9.])" + re.escape(version) + r"(?![0-9]|\.[0-9])")
     active, historical = [], []
     for name in tracked_files(root):
         path = root / name
@@ -221,7 +261,14 @@ def report(root, pins, latest, problems):
         else:
             status = "update available" if comparable(name, newest) > comparable(name, pinned) else "current"
         behind = behind or status != "current"
-        active, historical = locations(root, pinned.split("+")[0]) if status != "current" else ([], [])
+        active, historical = [], []
+        if status != "current":
+            try:
+                active, historical = locations(root, pinned.split("+")[0])
+            except EnumerationError as exc:
+                if str(exc) not in problems:
+                    problems = [*problems, str(exc)]
+                behind = True
         rows.append({"component": name, "pinned": pinned, "latest": newest, "status": status, "note": note,
                      "files": active, "historical": historical})
     lines = [MARKER, "Weekly comparison of the versions pinned by REA Safe Agent with upstream releases.", "",
